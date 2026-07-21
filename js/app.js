@@ -27,6 +27,7 @@ let currentMessId = null;
 let currentMessDoc = null;    // mess/{messId}
 let myRole = null;            // 'manager' | 'member'
 let messMembers = [];         // array of messMembers docs (with id)
+let messMealOffRequests = []; // array of mealOffRequests docs for this mess (with id), all statuses
 let unsubscribers = [];
 
 /* ---------- utils ---------- */
@@ -238,6 +239,14 @@ function attachMessListeners(){
   }, e => toast('Could not load expenses: ' + e.message, 'err'));
   unsubscribers.push(expSub);
 
+  const reqSub = db.collection('mealOffRequests').where('messId','==', currentMessId).onSnapshot(snap => {
+    messMealOffRequests = snap.docs.map(d => ({id:d.id, ...d.data({serverTimestamps: 'estimate'})}));
+    renderRequestsPanel();
+    const dateNow = document.getElementById('mealDatePicker').value || todayStr();
+    renderMealCards(dateNow);
+  }, e => toast('Could not load meal-off requests: ' + e.message, 'err'));
+  unsubscribers.push(reqSub);
+
   const noticeSub = db.collection('notices').where('messId','==', currentMessId).onSnapshot(snap => {
     const notices = snap.docs.map(d => ({id:d.id, ...d.data({serverTimestamps: 'estimate'})}))
       .sort((a,b) => (b.createdAt ? b.createdAt.toMillis() : 0) - (a.createdAt ? a.createdAt.toMillis() : 0))
@@ -302,11 +311,11 @@ function renderMealDeadlineNote(){
   if(lunchOpen && dinnerOpen){
     note.textContent = `⏰ Lunch closes at ${lunchTime}, dinner closes at ${dinnerTime} today.`;
   } else if(!lunchOpen && dinnerOpen){
-    note.textContent = `🔒 Lunch is locked (closed at ${lunchTime}) — only your manager can change it. Dinner is open until ${dinnerTime}.`;
+    note.textContent = `🔒 Lunch is locked (closed at ${lunchTime}) — send an off-request if you need it changed. Dinner is open until ${dinnerTime}.`;
   } else if(lunchOpen && !dinnerOpen){
-    note.textContent = `🔒 Dinner is locked (closed at ${dinnerTime}) — only your manager can change it. Lunch is open until ${lunchTime}.`;
+    note.textContent = `🔒 Dinner is locked (closed at ${dinnerTime}) — send an off-request if you need it changed. Lunch is open until ${lunchTime}.`;
   } else {
-    note.textContent = `🔒 Both lunch (${lunchTime}) and dinner (${dinnerTime}) are locked for today — only your manager can change them now.`;
+    note.textContent = `🔒 Both lunch (${lunchTime}) and dinner (${dinnerTime}) are locked for today — send an off-request for either one and your manager can approve it.`;
   }
 }
 
@@ -317,10 +326,38 @@ function loadMealsForDate(dateStr){
     const data = doc.exists ? doc.data() : {members: {}, dayOff: false};
     currentMealsCache = data.members || {};
     currentDayOff = !!data.dayOff;
-    renderMealTable(dateStr);
+    renderMealCards(dateStr);
     renderMealDeadlineNote();
     renderDayOffSwitch();
+    renderDaySummary(dateStr);
   });
+}
+
+function formatDateLabel(dateStr){
+  const d = new Date(dateStr + 'T00:00:00');
+  if(isNaN(d)) return dateStr;
+  return d.toLocaleDateString('en-GB', {day:'2-digit', month:'short', year:'numeric'});
+}
+
+/* Daily total meal count — colorful summary box at the top of the Meals tab */
+function renderDaySummary(dateStr){
+  const dateLabelEl = document.getElementById('dayTotalDateLabel');
+  if(!dateLabelEl) return; // not on this tab's DOM yet
+  dateLabelEl.textContent = formatDateLabel(dateStr) + (dateStr === todayStr() ? ' · today' : '');
+  let lunch = 0, dinner = 0, guest = 0, offCount = 0;
+  messMembers.forEach(m => {
+    const rec = currentMealsCache[m.userId] || {lunch:true, dinner:true, guest:0};
+    if(rec.lunch) lunch++; else offCount++;
+    if(rec.dinner) dinner++; else offCount++;
+    guest += Number(rec.guest || 0);
+  });
+  const total = lunch + dinner + guest;
+  document.getElementById('dayTotalMeals').innerHTML = total + '<span class="unit">meals</span>';
+  document.getElementById('dayTotalLunch').textContent = lunch;
+  document.getElementById('dayTotalDinner').textContent = dinner;
+  document.getElementById('dayTotalGuest').textContent = guest;
+  document.getElementById('dayTotalOff').textContent = offCount;
+  document.getElementById('dayOffBanner').classList.toggle('hidden', !currentDayOff);
 }
 
 function renderDayOffSwitch(){
@@ -336,6 +373,7 @@ function renderDayOffSwitch(){
 function toggleDayOff(){
   if(myRole !== 'manager') return;
   const dateStr = document.getElementById('mealDatePicker').value || todayStr();
+  if(dateStr < todayStr()){ toast('Past days can\u2019t be edited.', 'err'); return; }
   const mealId = currentMessId + '_' + dateStr;
   const newDayOff = !currentDayOff;
   const ref = db.collection('meals').doc(mealId);
@@ -357,50 +395,161 @@ function toggleDayOff(){
   }, {merge: true}).then(()=>{
     currentDayOff = newDayOff;
     currentMealsCache = updatedMembers;
-    renderMealTable(dateStr);
+    renderMealCards(dateStr);
     renderMealDeadlineNote();
     renderDayOffSwitch();
+    renderDaySummary(dateStr);
     renderDashboard();
     toast(newDayOff ? 'Meals switched OFF for this day' : 'Meals switched back ON for this day', 'ok');
   }).catch(e => toast(e.message, 'err'));
 }
 
-function renderMealTable(dateStr){
-  const tbody = document.querySelector('#mealTable tbody');
-  tbody.innerHTML = '';
+function renderMealCards(dateStr){
+  const wrap = document.getElementById('mealCards');
+  if(!wrap) return; // not on this tab's DOM yet
+  wrap.innerHTML = '';
   const isManager = myRole === 'manager';
+  const isPastDay = dateStr < todayStr();
+  const pendingForDate = messMealOffRequests.filter(r => r.date === dateStr && r.status === 'pending');
+
+  if(!messMembers.length){
+    wrap.innerHTML = `<div class="empty-state">No members in this mess yet.</div>`;
+    return;
+  }
+
   messMembers.forEach(mem => {
     const rec = currentMealsCache[mem.userId] || {lunch:true, dinner:true, guest:0}; // default ON, 0 guests
     const guestCount = rec.guest || 0;
+    const isSelf = mem.userId === currentUser.uid;
+
+    // Manager: can edit any current-or-future day, never a past one. Member: only their own row,
+    // only before that meal's deadline, and never once the day is fully switched off.
     const canEditLunch = isManager
-      ? !currentDayOff
-      : (mem.userId === currentUser.uid && !currentDayOff && isBeforeDeadlineFor(dateStr, 'lunch'));
+      ? (!currentDayOff && !isPastDay)
+      : (isSelf && !currentDayOff && isBeforeDeadlineFor(dateStr, 'lunch'));
     const canEditDinner = isManager
-      ? !currentDayOff
-      : (mem.userId === currentUser.uid && !currentDayOff && isBeforeDeadlineFor(dateStr, 'dinner'));
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${esc(mem.name)} ${mem.role==='manager' ? '<span class="pill role">Manager</span>' : ''}</td>
-      <td><button class="meal-toggle ${rec.lunch ? 'on':''}" ${canEditLunch?'':'disabled'} onclick="toggleMeal('${dateStr}','${mem.userId}','lunch')"><span class="knob"></span></button></td>
-      <td><button class="meal-toggle ${rec.dinner ? 'on':''}" ${canEditDinner?'':'disabled'} onclick="toggleMeal('${dateStr}','${mem.userId}','dinner')"><span class="knob"></span></button></td>
-      <td>
+      ? (!currentDayOff && !isPastDay)
+      : (isSelf && !currentDayOff && isBeforeDeadlineFor(dateStr, 'dinner'));
+
+    const lunchPending = pendingForDate.find(r => r.memberId === mem.userId && r.mealType === 'lunch');
+    const dinnerPending = pendingForDate.find(r => r.memberId === mem.userId && r.mealType === 'dinner');
+
+    // Deadline passed but meal is still ON: the member can ask the manager to turn it off instead.
+    const canRequestLunch = !isManager && isSelf && !currentDayOff && !isPastDay && rec.lunch && !canEditLunch && !lunchPending;
+    const canRequestDinner = !isManager && isSelf && !currentDayOff && !isPastDay && rec.dinner && !canEditDinner && !dinnerPending;
+
+    const lunchCell = lunchPending
+      ? `<span class="request-pending-badge">Awaiting approval</span>`
+      : canRequestLunch
+        ? `<button class="btn-request-off" onclick="requestMealOff('${dateStr}','lunch')">Request off</button>`
+        : `<button class="meal-toggle ${rec.lunch ? 'on':''}" ${canEditLunch?'':'disabled'} onclick="toggleMeal('${dateStr}','${mem.userId}','lunch')"><span class="knob"></span></button>`;
+
+    const dinnerCell = dinnerPending
+      ? `<span class="request-pending-badge">Awaiting approval</span>`
+      : canRequestDinner
+        ? `<button class="btn-request-off" onclick="requestMealOff('${dateStr}','dinner')">Request off</button>`
+        : `<button class="meal-toggle ${rec.dinner ? 'on':''}" ${canEditDinner?'':'disabled'} onclick="toggleMeal('${dateStr}','${mem.userId}','dinner')"><span class="knob"></span></button>`;
+
+    const row = document.createElement('div');
+    row.className = 'meal-card-row';
+    row.innerHTML = `
+      <div class="mc-name">${esc(mem.name)} ${mem.role==='manager' ? '<span class="pill role">Manager</span>' : ''}</div>
+      <div class="mc-col"><span class="mc-col-label">☀️ Lunch</span>${lunchCell}</div>
+      <div class="mc-col"><span class="mc-col-label">🌙 Dinner</span>${dinnerCell}</div>
+      <div class="mc-col">
+        <span class="mc-col-label">👤 Guest</span>
         <div class="guest-stepper">
-          <button ${isManager && !currentDayOff ?'':'disabled'} onclick="setGuestMeals('${dateStr}','${mem.userId}',${guestCount - 1})">−</button>
+          <button ${isManager && !currentDayOff && !isPastDay ? '' : 'disabled'} onclick="setGuestMeals('${dateStr}','${mem.userId}',${guestCount - 1})">−</button>
           <span>${guestCount}</span>
-          <button ${isManager && !currentDayOff ?'':'disabled'} onclick="setGuestMeals('${dateStr}','${mem.userId}',${guestCount + 1})">+</button>
+          <button ${isManager && !currentDayOff && !isPastDay ? '' : 'disabled'} onclick="setGuestMeals('${dateStr}','${mem.userId}',${guestCount + 1})">+</button>
         </div>
-      </td>
+      </div>
     `;
-    tbody.appendChild(tr);
+    wrap.appendChild(row);
   });
+}
+
+/* ---------- meal-off requests: member asks after the deadline, manager approves/declines ---------- */
+function requestMealOff(dateStr, mealType){
+  if(myRole === 'manager') return;
+  if(dateStr < todayStr()){ toast('Past days can\u2019t be changed.', 'err'); return; }
+  const already = messMealOffRequests.find(r => r.date === dateStr && r.mealType === mealType && r.memberId === currentUser.uid && r.status === 'pending');
+  if(already){ toast('You already have a pending request for this meal.', 'err'); return; }
+  db.collection('mealOffRequests').add({
+    messId: currentMessId, date: dateStr, mealType,
+    memberId: currentUser.uid, memberName: currentUserDoc.name,
+    status: 'pending',
+    requestedAt: firebase.firestore.FieldValue.serverTimestamp()
+  }).then(()=> toast('Off-request sent to your manager', 'ok'))
+    .catch(e => toast(e.message, 'err'));
+}
+
+function approveMealOffRequest(reqId){
+  if(myRole !== 'manager') return;
+  const req = messMealOffRequests.find(r => r.id === reqId);
+  if(!req) return;
+  const mealId = currentMessId + '_' + req.date;
+  const mealRef = db.collection('meals').doc(mealId);
+  const reqRef = db.collection('mealOffRequests').doc(reqId);
+  db.runTransaction(tx => tx.get(mealRef).then(doc => {
+    const data = doc.exists ? doc.data() : {members: {}};
+    const members = data.members || {};
+    const current = members[req.memberId] || {lunch:true, dinner:true, guest:0};
+    tx.set(mealRef, {
+      messId: currentMessId, date: req.date,
+      members: { [req.memberId]: { ...current, [req.mealType]: false } },
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedBy: currentUser.uid
+    }, {merge: true});
+    tx.update(reqRef, { status: 'approved', respondedAt: firebase.firestore.FieldValue.serverTimestamp(), respondedBy: currentUser.uid });
+  })).then(()=>{
+    toast(`${req.memberName}'s ${req.mealType} marked off`, 'ok');
+    loadMealsForDate(document.getElementById('mealDatePicker').value || todayStr());
+    renderDashboard();
+  }).catch(e => toast(e.message, 'err'));
+}
+
+function rejectMealOffRequest(reqId){
+  if(myRole !== 'manager') return;
+  db.collection('mealOffRequests').doc(reqId).update({
+    status: 'rejected',
+    respondedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    respondedBy: currentUser.uid
+  }).then(()=> toast('Request declined', 'ok')).catch(e => toast(e.message, 'err'));
+}
+
+function renderRequestsPanel(){
+  const list = document.getElementById('requestsList');
+  if(!list || myRole !== 'manager') return;
+  const pending = messMealOffRequests.filter(r => r.status === 'pending').sort((a,b)=> (a.date||'').localeCompare(b.date||''));
+  if(!pending.length){
+    list.innerHTML = `<p style="font-size:13px; color:var(--ink-soft);">No pending requests right now.</p>`;
+    return;
+  }
+  list.innerHTML = pending.map(r => `
+    <div class="request-row">
+      <div class="request-info">
+        <strong>${esc(r.memberName)}</strong> wants ${esc(r.mealType)} off on ${esc(formatDateLabel(r.date))}
+        <span class="r-meta">Requested ${r.requestedAt ? timeAgo(r.requestedAt.toDate()) : 'just now'}</span>
+      </div>
+      <div class="request-actions">
+        <button class="btn tiny approve" onclick="approveMealOffRequest('${r.id}')">Approve</button>
+        <button class="btn tiny reject" onclick="rejectMealOffRequest('${r.id}')">Decline</button>
+      </div>
+    </div>
+  `).join('');
 }
 
 function toggleMeal(dateStr, memberId, type){
   if(currentDayOff && myRole !== 'manager'){ toast('Meals are switched off for this day.', 'err'); return; }
-  const canEdit = myRole === 'manager' || (memberId === currentUser.uid && isBeforeDeadlineFor(dateStr, type));
+  const isPastDay = dateStr < todayStr();
+  if(myRole === 'manager' && isPastDay){ toast('Past days can\u2019t be edited.', 'err'); return; }
+  const canEdit = myRole === 'manager'
+    ? !isPastDay
+    : (memberId === currentUser.uid && isBeforeDeadlineFor(dateStr, type));
   if(!canEdit){
     const label = type === 'dinner' ? 'dinner' : 'lunch';
-    toast(`The ${label} deadline has passed — ask your manager to update this.`, 'err');
+    toast(`The ${label} deadline has passed — send an off-request instead.`, 'err');
     return;
   }
   const mealId = currentMessId + '_' + dateStr;
@@ -414,7 +563,8 @@ function toggleMeal(dateStr, memberId, type){
     updatedBy: currentUser.uid
   }, {merge: true}).then(()=>{
     currentMealsCache[memberId] = { ...current, [type]: newVal };
-    renderMealTable(dateStr);
+    renderMealCards(dateStr);
+    renderDaySummary(dateStr);
     renderDashboard();
   }).catch(e => toast(e.message, 'err'));
 }
@@ -423,6 +573,7 @@ function toggleMeal(dateStr, memberId, type){
 // Manager-controlled since it directly affects shared cost distribution.
 function setGuestMeals(dateStr, memberId, newCount){
   if(myRole !== 'manager'){ toast('Only the manager can add guest meals.', 'err'); return; }
+  if(dateStr < todayStr()){ toast('Past days can\u2019t be edited.', 'err'); return; }
   if(newCount < 0) newCount = 0;
   const mealId = currentMessId + '_' + dateStr;
   const current = currentMealsCache[memberId] || {lunch:true, dinner:true, guest:0};
@@ -434,7 +585,8 @@ function setGuestMeals(dateStr, memberId, newCount){
     updatedBy: currentUser.uid
   }, {merge: true}).then(()=>{
     currentMealsCache[memberId] = { ...current, guest: newCount };
-    renderMealTable(dateStr);
+    renderMealCards(dateStr);
+    renderDaySummary(dateStr);
     renderDashboard();
   }).catch(e => toast(e.message, 'err'));
 }
@@ -518,14 +670,41 @@ function promoteMember(docId, name, currentRole){
 }
 function renderDepositSelect(){
   const sel = document.getElementById('depositMemberSelect');
+  const prevValue = sel.value;
   sel.innerHTML = messMembers.map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join('');
+  if(prevValue && messMembers.some(m => m.id === prevValue)) sel.value = prevValue;
+  updateCurrentDepositHint();
 }
-function updateDeposit(){
+function updateCurrentDepositHint(){
+  const hint = document.getElementById('currentDepositHint');
+  if(!hint) return;
+  const docId = document.getElementById('depositMemberSelect').value;
+  const mem = messMembers.find(m => m.id === docId);
+  hint.textContent = mem ? `Current deposit: ${money(mem.deposit)}` : '';
+}
+// Adds to a member's running deposit total (atomic increment) so repeated top-ups
+// throughout the month always accumulate correctly instead of silently overwriting each other.
+function addFund(){
   const docId = document.getElementById('depositMemberSelect').value;
   const amount = Number(document.getElementById('depositAmount').value);
-  if(!docId || isNaN(amount)){ toast('Choose a member and enter an amount', 'err'); return; }
+  if(!docId || !amount || amount <= 0){ toast('Choose a member and enter a positive amount', 'err'); return; }
+  db.collection('messMembers').doc(docId).update({
+    deposit: firebase.firestore.FieldValue.increment(amount)
+  }).then(()=>{
+    document.getElementById('depositAmount').value = '';
+    toast('Fund added — dashboard updated', 'ok');
+  }).catch(e => toast(e.message, 'err'));
+}
+// Corrects a member's deposit to an exact figure (e.g. fixing a typo), overwriting rather than adding.
+function setExactDeposit(){
+  const docId = document.getElementById('depositMemberSelect').value;
+  const amount = Number(document.getElementById('depositAmount').value);
+  if(!docId || isNaN(amount) || amount < 0){ toast('Choose a member and enter a valid amount', 'err'); return; }
   db.collection('messMembers').doc(docId).update({deposit: amount})
-    .then(()=> toast('Deposit updated', 'ok'))
+    .then(()=>{
+      document.getElementById('depositAmount').value = '';
+      toast('Deposit corrected', 'ok');
+    })
     .catch(e => toast(e.message, 'err'));
 }
 
@@ -572,6 +751,10 @@ function timeAgo(date){
   const days = Math.floor(hrs / 24);
   return days + 'd ago';
 }
+function formatDateTime(date){
+  if(!date) return '';
+  return date.toLocaleString('en-GB', {day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit'});
+}
 
 function renderNoticeBoard(notices){
   const mainText = document.getElementById('noticeMainText');
@@ -588,14 +771,14 @@ function renderNoticeBoard(notices){
   const latest = notices[0];
   const latestDate = latest.createdAt ? latest.createdAt.toDate() : new Date();
   mainText.textContent = '“' + latest.text + '”';
-  mainMeta.textContent = '— ' + latest.authorName + ' · ' + timeAgo(latestDate);
+  mainMeta.textContent = '— ' + latest.authorName + ' · ' + formatDateTime(latestDate) + ' (' + timeAgo(latestDate) + ')';
 
   const rest = notices.slice(1);
   if(rest.length){
     historyWrap.classList.remove('hidden');
     historyList.innerHTML = rest.map(n => {
       const d = n.createdAt ? n.createdAt.toDate() : null;
-      return `<div class="notice-item"><span>${esc(n.text)} — <em>${esc(n.authorName)}</em></span><span class="n-meta">${timeAgo(d)}</span></div>`;
+      return `<div class="notice-item"><span>${esc(n.text)} — <em>${esc(n.authorName)}</em></span><span class="n-meta">${d ? formatDateTime(d) : timeAgo(d)}</span></div>`;
     }).join('');
   } else {
     historyWrap.classList.add('hidden');
@@ -621,12 +804,15 @@ function postNotice(){
 /* ============================================================
    DASHBOARD CALCULATIONS
 ============================================================ */
+let dashboardRenderToken = 0; // guards against a slow/stale async response overwriting a newer render
 function renderDashboard(expensesArg){
   if(!currentMessId) return;
+  const myToken = ++dashboardRenderToken;
   const run = (expenses) => {
     const totalExpense = expenses.reduce((s,e)=> s + Number(e.amount||0), 0);
     // total meals: sum lunch+dinner ON counts across ALL days recorded for this mess
     db.collection('meals').where('messId','==', currentMessId).get().then(snap => {
+      if(myToken !== dashboardRenderToken) return; // a newer render has already started — drop this stale one
       let totalMeals = 0;
       const perMember = {}; // userId -> {lunch, dinner, guest, total}
       messMembers.forEach(m => perMember[m.userId] = {lunch:0, dinner:0, guest:0, total:0});
