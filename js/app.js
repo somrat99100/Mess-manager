@@ -147,12 +147,13 @@ function loadUserAndMess(){
 function createMess(){
   const name = document.getElementById('newMessName').value.trim();
   const location = document.getElementById('newMessLocation').value.trim();
-  const deadline = document.getElementById('newMessDeadline').value || '22:00';
+  const lunchDeadline = document.getElementById('newMessLunchDeadline').value || '09:00';
+  const dinnerDeadline = document.getElementById('newMessDinnerDeadline').value || '16:00';
   if(!name){ toast('Please enter a mess name', 'err'); return; }
   const inviteCode = genInviteCode(name);
   const messRef = db.collection('mess').doc();
   messRef.set({
-    name, location, inviteCode, deadline,
+    name, location, inviteCode, lunchDeadline, dinnerDeadline,
     managerIds: [currentUser.uid],
     createdAt: firebase.firestore.FieldValue.serverTimestamp()
   }).then(()=> db.collection('messMembers').doc(messRef.id + '_' + currentUser.uid).set({
@@ -211,9 +212,10 @@ function attachMessListeners(){
     document.getElementById('setMessName').value = currentMessDoc.name || '';
     document.getElementById('setLocation').value = currentMessDoc.location || '';
     document.getElementById('setPhone').value = currentMessDoc.phone || '';
-    document.getElementById('setDeadline').value = currentMessDoc.deadline || '22:00';
+    document.getElementById('setLunchDeadline').value = currentMessDoc.lunchDeadline || '09:00';
+    document.getElementById('setDinnerDeadline').value = currentMessDoc.dinnerDeadline || '16:00';
     renderMealDeadlineNote();
-  });
+  }, e => toast('Could not load mess details: ' + e.message, 'err'));
   unsubscribers.push(messSub);
 
   const membersSub = db.collection('messMembers').where('messId','==', currentMessId).onSnapshot(snap => {
@@ -222,20 +224,26 @@ function attachMessListeners(){
     renderDepositSelect();
     loadMealsForDate(document.getElementById('mealDatePicker').value || todayStr());
     renderDashboard();
-  });
+  }, e => toast('Could not load members: ' + e.message, 'err'));
   unsubscribers.push(membersSub);
 
-  const expSub = db.collection('expenses').where('messId','==', currentMessId).orderBy('createdAt','desc').onSnapshot(snap => {
-    const expenses = snap.docs.map(d => ({id:d.id, ...d.data()}));
+  // No orderBy here on purpose — a where() + orderBy() combo needs a manually-created composite
+  // Firestore index, and until that index exists the whole listener silently fails. Sorting in the
+  // browser instead means expenses always show up right away, index or no index.
+  const expSub = db.collection('expenses').where('messId','==', currentMessId).onSnapshot(snap => {
+    const expenses = snap.docs.map(d => ({id:d.id, ...d.data({serverTimestamps: 'estimate'})}))
+      .sort((a,b) => (b.createdAt ? b.createdAt.toMillis() : 0) - (a.createdAt ? a.createdAt.toMillis() : 0));
     renderExpenseTable(expenses);
     renderDashboard(expenses);
-  });
+  }, e => toast('Could not load expenses: ' + e.message, 'err'));
   unsubscribers.push(expSub);
 
-  const noticeSub = db.collection('notices').where('messId','==', currentMessId).orderBy('createdAt','desc').limit(20).onSnapshot(snap => {
-    const notices = snap.docs.map(d => ({id:d.id, ...d.data()}));
+  const noticeSub = db.collection('notices').where('messId','==', currentMessId).onSnapshot(snap => {
+    const notices = snap.docs.map(d => ({id:d.id, ...d.data({serverTimestamps: 'estimate'})}))
+      .sort((a,b) => (b.createdAt ? b.createdAt.toMillis() : 0) - (a.createdAt ? a.createdAt.toMillis() : 0))
+      .slice(0, 20);
     renderNoticeBoard(notices);
-  });
+  }, e => toast('Could not load notices: ' + e.message, 'err'));
   unsubscribers.push(noticeSub);
 
   if(!document.getElementById('mealDatePicker').value){
@@ -256,16 +264,19 @@ function switchTab(tab){
 /* ============================================================
    MEALS
 ============================================================ */
-let currentMealsCache = {}; // memberId -> {lunch,dinner,docId}
+let currentMealsCache = {}; // memberId -> {lunch,dinner,guest}
+let currentDayOff = false;  // whole-day "mess off" switch for the selected date
 
-function isBeforeDeadlineFor(dateStr){
-  // members may edit today's or future date's meals only while local time is before the mess deadline,
-  // and only for dates that are today or later.
+function isBeforeDeadlineFor(dateStr, mealType){
+  // members may edit today's or future date's meals only while local time is before that
+  // meal's own cutoff, and only for dates that are today or later.
   if(!currentMessDoc) return false;
   const today = todayStr();
   if(dateStr < today) return false; // never edit past dates as a member
   if(dateStr > today) return true;  // future dates always editable pre-deadline
-  const [h,m] = (currentMessDoc.deadline || '22:00').split(':').map(Number);
+  const field = mealType === 'dinner' ? 'dinnerDeadline' : 'lunchDeadline';
+  const fallback = mealType === 'dinner' ? '16:00' : '09:00';
+  const [h,m] = (currentMessDoc[field] || fallback).split(':').map(Number);
   const now = new Date();
   const deadline = new Date(); deadline.setHours(h, m, 0, 0);
   return now < deadline;
@@ -278,43 +289,105 @@ function renderMealDeadlineNote(){
     note.classList.add('hidden');
     return;
   }
-  const editable = isBeforeDeadlineFor(dateStr);
+  if(currentDayOff){
+    note.classList.remove('hidden');
+    note.textContent = `🚫 Meals are turned OFF for this day — your manager has switched off cooking today.`;
+    return;
+  }
+  const lunchOpen = isBeforeDeadlineFor(dateStr, 'lunch');
+  const dinnerOpen = isBeforeDeadlineFor(dateStr, 'dinner');
   note.classList.remove('hidden');
-  note.textContent = editable
-    ? `⏰ You can update this day's meals until ${currentMessDoc.deadline} today.`
-    : `🔒 The meal deadline (${currentMessDoc.deadline}) has passed for this date — only your manager can change it now.`;
+  const lunchTime = currentMessDoc.lunchDeadline || '09:00';
+  const dinnerTime = currentMessDoc.dinnerDeadline || '16:00';
+  if(lunchOpen && dinnerOpen){
+    note.textContent = `⏰ Lunch closes at ${lunchTime}, dinner closes at ${dinnerTime} today.`;
+  } else if(!lunchOpen && dinnerOpen){
+    note.textContent = `🔒 Lunch is locked (closed at ${lunchTime}) — only your manager can change it. Dinner is open until ${dinnerTime}.`;
+  } else if(lunchOpen && !dinnerOpen){
+    note.textContent = `🔒 Dinner is locked (closed at ${dinnerTime}) — only your manager can change it. Lunch is open until ${lunchTime}.`;
+  } else {
+    note.textContent = `🔒 Both lunch (${lunchTime}) and dinner (${dinnerTime}) are locked for today — only your manager can change them now.`;
+  }
 }
 
 function loadMealsForDate(dateStr){
   if(!currentMessId || !dateStr) return;
   const mealId = currentMessId + '_' + dateStr;
   db.collection('meals').doc(mealId).get().then(doc => {
-    const data = doc.exists ? doc.data() : {members: {}};
+    const data = doc.exists ? doc.data() : {members: {}, dayOff: false};
     currentMealsCache = data.members || {};
+    currentDayOff = !!data.dayOff;
     renderMealTable(dateStr);
     renderMealDeadlineNote();
+    renderDayOffSwitch();
   });
+}
+
+function renderDayOffSwitch(){
+  const wrap = document.getElementById('dayOffSwitchWrap');
+  if(!wrap) return;
+  if(myRole !== 'manager'){ wrap.classList.add('hidden'); return; }
+  wrap.classList.remove('hidden');
+  const toggle = document.getElementById('dayOffToggle');
+  toggle.classList.toggle('on', !currentDayOff);
+  document.getElementById('dayOffLabel').textContent = currentDayOff ? 'Meals OFF for this day' : 'Meals ON for this day';
+}
+
+function toggleDayOff(){
+  if(myRole !== 'manager') return;
+  const dateStr = document.getElementById('mealDatePicker').value || todayStr();
+  const mealId = currentMessId + '_' + dateStr;
+  const newDayOff = !currentDayOff;
+  const ref = db.collection('meals').doc(mealId);
+  let updatedMembers = currentMealsCache;
+  if(newDayOff){
+    // switching the whole day off: everyone's lunch & dinner go OFF (guest counts kept as-is)
+    updatedMembers = {};
+    messMembers.forEach(m => {
+      const cur = currentMealsCache[m.userId] || {lunch:true, dinner:true, guest:0};
+      updatedMembers[m.userId] = { ...cur, lunch:false, dinner:false };
+    });
+  }
+  ref.set({
+    messId: currentMessId, date: dateStr,
+    dayOff: newDayOff,
+    members: updatedMembers,
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    updatedBy: currentUser.uid
+  }, {merge: true}).then(()=>{
+    currentDayOff = newDayOff;
+    currentMealsCache = updatedMembers;
+    renderMealTable(dateStr);
+    renderMealDeadlineNote();
+    renderDayOffSwitch();
+    renderDashboard();
+    toast(newDayOff ? 'Meals switched OFF for this day' : 'Meals switched back ON for this day', 'ok');
+  }).catch(e => toast(e.message, 'err'));
 }
 
 function renderMealTable(dateStr){
   const tbody = document.querySelector('#mealTable tbody');
   tbody.innerHTML = '';
-  const editable = myRole === 'manager' || isBeforeDeadlineFor(dateStr);
   const isManager = myRole === 'manager';
   messMembers.forEach(mem => {
     const rec = currentMealsCache[mem.userId] || {lunch:true, dinner:true, guest:0}; // default ON, 0 guests
     const guestCount = rec.guest || 0;
-    const canEditThisRow = isManager ? true : (mem.userId === currentUser.uid && editable);
+    const canEditLunch = isManager
+      ? !currentDayOff
+      : (mem.userId === currentUser.uid && !currentDayOff && isBeforeDeadlineFor(dateStr, 'lunch'));
+    const canEditDinner = isManager
+      ? !currentDayOff
+      : (mem.userId === currentUser.uid && !currentDayOff && isBeforeDeadlineFor(dateStr, 'dinner'));
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${esc(mem.name)} ${mem.role==='manager' ? '<span class="pill role">Manager</span>' : ''}</td>
-      <td><button class="meal-toggle ${rec.lunch ? 'on':''}" ${canEditThisRow?'':'disabled'} onclick="toggleMeal('${dateStr}','${mem.userId}','lunch')"><span class="knob"></span></button></td>
-      <td><button class="meal-toggle ${rec.dinner ? 'on':''}" ${canEditThisRow?'':'disabled'} onclick="toggleMeal('${dateStr}','${mem.userId}','dinner')"><span class="knob"></span></button></td>
+      <td><button class="meal-toggle ${rec.lunch ? 'on':''}" ${canEditLunch?'':'disabled'} onclick="toggleMeal('${dateStr}','${mem.userId}','lunch')"><span class="knob"></span></button></td>
+      <td><button class="meal-toggle ${rec.dinner ? 'on':''}" ${canEditDinner?'':'disabled'} onclick="toggleMeal('${dateStr}','${mem.userId}','dinner')"><span class="knob"></span></button></td>
       <td>
         <div class="guest-stepper">
-          <button ${isManager?'':'disabled'} onclick="setGuestMeals('${dateStr}','${mem.userId}',${guestCount - 1})">−</button>
+          <button ${isManager && !currentDayOff ?'':'disabled'} onclick="setGuestMeals('${dateStr}','${mem.userId}',${guestCount - 1})">−</button>
           <span>${guestCount}</span>
-          <button ${isManager?'':'disabled'} onclick="setGuestMeals('${dateStr}','${mem.userId}',${guestCount + 1})">+</button>
+          <button ${isManager && !currentDayOff ?'':'disabled'} onclick="setGuestMeals('${dateStr}','${mem.userId}',${guestCount + 1})">+</button>
         </div>
       </td>
     `;
@@ -323,8 +396,13 @@ function renderMealTable(dateStr){
 }
 
 function toggleMeal(dateStr, memberId, type){
-  const canEdit = myRole === 'manager' || (memberId === currentUser.uid && isBeforeDeadlineFor(dateStr));
-  if(!canEdit){ toast('The meal deadline has passed — ask your manager to update this.', 'err'); return; }
+  if(currentDayOff && myRole !== 'manager'){ toast('Meals are switched off for this day.', 'err'); return; }
+  const canEdit = myRole === 'manager' || (memberId === currentUser.uid && isBeforeDeadlineFor(dateStr, type));
+  if(!canEdit){
+    const label = type === 'dinner' ? 'dinner' : 'lunch';
+    toast(`The ${label} deadline has passed — ask your manager to update this.`, 'err');
+    return;
+  }
   const mealId = currentMessId + '_' + dateStr;
   const current = currentMealsCache[memberId] || {lunch:true, dinner:true, guest:0};
   const newVal = !current[type];
@@ -459,7 +537,8 @@ function saveMessSettings(){
     name: document.getElementById('setMessName').value.trim(),
     location: document.getElementById('setLocation').value.trim(),
     phone: document.getElementById('setPhone').value.trim(),
-    deadline: document.getElementById('setDeadline').value || '22:00'
+    lunchDeadline: document.getElementById('setLunchDeadline').value || '09:00',
+    dinnerDeadline: document.getElementById('setDinnerDeadline').value || '16:00'
   }).then(()=> toast('Mess settings saved', 'ok')).catch(e => toast(e.message,'err'));
 }
 
