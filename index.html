@@ -340,8 +340,12 @@
         <div class="card panel">
           <div class="panel-head">
             <h3>Daily meal log</h3>
-            <div style="display:flex; gap:10px; align-items:center;">
+            <div style="display:flex; gap:14px; align-items:center; flex-wrap:wrap;">
               <input type="date" id="mealDatePicker" class="mono" style="padding:8px 12px; border:1.5px solid var(--line); border-radius:8px;">
+              <div id="dayOffSwitchWrap" class="hidden" style="display:flex; align-items:center; gap:10px;">
+                <span id="dayOffLabel" style="font-size:13px; font-weight:600; color:var(--ink-soft);"></span>
+                <button id="dayOffToggle" class="meal-toggle" onclick="toggleDayOff()" title="Turn all meals on/off for this day"><span class="knob"></span></button>
+              </div>
             </div>
           </div>
           <div id="deadlineNote" class="deadline-note hidden"></div>
@@ -391,9 +395,9 @@
             <div class="field"><label>Location</label><input type="text" id="setLocation"></div>
             <div class="field"><label>Contact phone</label><input type="text" id="setPhone"></div>
           </div>
-          <div class="field" style="max-width:220px;">
-            <label>Daily meal deadline (24h)</label>
-            <input type="time" id="setDeadline">
+          <div class="grid-3">
+            <div class="field"><label>Lunch cutoff time (24h)</label><input type="time" id="setLunchDeadline"></div>
+            <div class="field"><label>Dinner cutoff time (24h)</label><input type="time" id="setDinnerDeadline"></div>
           </div>
           <button class="btn terra" onclick="saveMessSettings()">Save settings</button>
         </div>
@@ -433,7 +437,8 @@
     <h3>Create your mess</h3>
     <div class="field"><label>Mess name</label><input type="text" id="newMessName" placeholder="e.g. Green Valley Hostel Mess"></div>
     <div class="field"><label>Location</label><input type="text" id="newMessLocation" placeholder="e.g. Dhanmondi, Dhaka"></div>
-    <div class="field"><label>Daily meal deadline (24h)</label><input type="time" id="newMessDeadline" value="22:00"></div>
+    <div class="field"><label>Lunch cutoff time (24h)</label><input type="time" id="newMessLunchDeadline" value="09:00"></div>
+    <div class="field"><label>Dinner cutoff time (24h)</label><input type="time" id="newMessDinnerDeadline" value="16:00"></div>
     <div class="modal-actions">
       <button class="btn outline small" onclick="closeModal('createMessModal')">Cancel</button>
       <button class="btn terra small" onclick="createMess()">Create mess</button>
