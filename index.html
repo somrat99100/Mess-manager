@@ -337,20 +337,45 @@
 
       <!-- MEALS -->
       <div id="tab-meals" class="tab-panel hidden">
-        <div class="card panel">
-          <div class="panel-head">
-            <h3>Daily meal log</h3>
-            <div style="display:flex; gap:14px; align-items:center; flex-wrap:wrap;">
-              <input type="date" id="mealDatePicker" class="mono" style="padding:8px 12px; border:1.5px solid var(--line); border-radius:8px;">
-              <div id="dayOffSwitchWrap" class="hidden" style="display:flex; align-items:center; gap:10px;">
-                <span id="dayOffLabel" style="font-size:13px; font-weight:600; color:var(--ink-soft);"></span>
-                <button id="dayOffToggle" class="meal-toggle" onclick="toggleDayOff()" title="Turn all meals on/off for this day"><span class="knob"></span></button>
-              </div>
+
+        <div class="meals-head-row">
+          <h2>Daily meal log</h2>
+          <div class="date-field">
+            <input type="date" id="mealDatePicker" class="mono">
+            <div id="dayOffSwitchWrap" class="hidden" style="display:flex; align-items:center; gap:10px;">
+              <span id="dayOffLabel" style="font-size:13px; font-weight:600; color:var(--ink-soft);"></span>
+              <button id="dayOffToggle" class="meal-toggle" onclick="toggleDayOff()" title="Turn all meals on/off for this day"><span class="knob"></span></button>
             </div>
           </div>
+        </div>
+
+        <!-- Colorful-framed daily total box -->
+        <div class="summary-frame">
+          <div class="summary-box">
+            <div class="summary-eyebrow">Total meals</div>
+            <div class="summary-total" id="dayTotalMeals">0<span class="unit">meals</span></div>
+            <div class="summary-date" id="dayTotalDateLabel">—</div>
+            <div class="summary-breakdown">
+              <div class="summary-chip c-lunch"><span class="s-icon">☀️</span><span class="s-val" id="dayTotalLunch">0</span><span class="s-lbl">Lunch</span></div>
+              <div class="summary-chip c-dinner"><span class="s-icon">🌙</span><span class="s-val" id="dayTotalDinner">0</span><span class="s-lbl">Dinner</span></div>
+              <div class="summary-chip c-guest"><span class="s-icon">👤</span><span class="s-val" id="dayTotalGuest">0</span><span class="s-lbl">Guest</span></div>
+              <div class="summary-chip c-off"><span class="s-icon">🚫</span><span class="s-val" id="dayTotalOff">0</span><span class="s-lbl">Off</span></div>
+            </div>
+            <div id="dayOffBanner" class="day-off-banner hidden">🚫 Meals are switched OFF for this day</div>
+          </div>
+        </div>
+
+        <!-- Manager: pending meal-off requests -->
+        <div class="card panel requests-panel manager-only hidden" id="requestsPanelWrap">
+          <div class="panel-head"><h3>⏳ Pending meal-off requests</h3></div>
+          <div id="requestsList"></div>
+        </div>
+
+        <div class="card panel">
+          <div class="panel-head"><h3>Member meals</h3></div>
           <div id="deadlineNote" class="deadline-note hidden"></div>
-          <p class="manager-only hidden" style="font-size:12.5px; color:var(--ink-soft); margin-bottom:10px;">Guest meals: extra meals a member's guest ate that day — added to that member's meal count and cost. Manager-controlled.</p>
-          <div style="overflow-x:auto;"><table id="mealTable"><thead><tr><th>Member</th><th>☀️ Lunch</th><th>🌙 Dinner</th><th>👤 Guest meals</th></tr></thead><tbody></tbody></table></div>
+          <p class="manager-only hidden" style="font-size:12.5px; color:var(--ink-soft); margin-bottom:14px;">Guest meals: extra meals a member's guest ate that day — added to that member's meal count and cost. Manager-controlled. Past days can no longer be edited, even by the manager.</p>
+          <div class="meal-cards" id="mealCards"></div>
         </div>
       </div>
 
@@ -402,15 +427,20 @@
           <button class="btn terra" onclick="saveMessSettings()">Save settings</button>
         </div>
         <div class="card panel">
-          <div class="panel-head"><h3>Set a member's deposit</h3></div>
-          <div class="grid-3">
+          <div class="panel-head"><h3>Add fund for a member</h3></div>
+          <p style="font-size:12.5px; color:var(--ink-soft); margin-bottom:14px;">Each amount you add here is added on top of that member's existing deposit — safe to use every time they pay in, first payment or fifth.</p>
+          <div class="grid-2">
             <div class="field">
               <label>Member</label>
-              <select id="depositMemberSelect"></select>
+              <select id="depositMemberSelect" onchange="updateCurrentDepositHint()"></select>
+              <div id="currentDepositHint" style="font-size:12px; color:var(--ink-soft); margin-top:6px;"></div>
             </div>
-            <div class="field"><label>New deposit (৳)</label><input type="number" id="depositAmount"></div>
+            <div class="field"><label>Amount to add (৳)</label><input type="number" id="depositAmount" min="0" placeholder="e.g. 1000"></div>
           </div>
-          <button class="btn outline" onclick="updateDeposit()">Update deposit</button>
+          <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            <button class="btn terra" onclick="addFund()">Add fund</button>
+            <button class="btn outline small" onclick="setExactDeposit()" title="Overwrite instead of adding — use only to fix a mistake">Correct to exact amount</button>
+          </div>
         </div>
       </div>
 
