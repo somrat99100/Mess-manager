@@ -4,13 +4,15 @@ document.getElementById('year').textContent = new Date().getFullYear();
    FIREBASE CONFIG
    Replace with your own Firebase project config (Project Settings > General > Your apps).
 ============================================================ */
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyBRvsAWhPGg7FWq5htgDouCjkuvTnSgs9o",
+  authDomain: "mess-manager-pro-e3500.firebaseapp.com",
+  projectId: "mess-manager-pro-e3500",
+  storageBucket: "mess-manager-pro-e3500.firebasestorage.app",
+  messagingSenderId: "694751229162",
+  appId: "1:694751229162:web:3dbb7052cf48e90bce5393",
+  measurementId: "G-2DE8THETRE"
 };
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
