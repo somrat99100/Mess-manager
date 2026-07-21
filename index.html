@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+
+<!-- ============ PRIMARY SEO ============ -->
+<title>Mess Manager Pro | Hostel Meal & Mess Expense Tracker App</title>
+<meta name="description" content="Mess Manager Pro is a free web app for hostel and mess groups to track daily meals, split expenses, and manage member balances in real time. Built for students, roommates, and shared kitchens.">
+<meta name="keywords" content="mess manager, hostel meal tracker, mess expense tracker, meal management app, hostel mess app, roommate expense splitter, IUBAT mess, mess calculator, meal rate calculator">
+<meta name="author" content="Somrat">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="https://somrat99100.github.io/mess-manager-pro/">
+
+<!-- ============ OPEN GRAPH ============ -->
+<meta property="og:type" content="website">
+<meta property="og:title" content="Mess Manager Pro | Hostel Meal & Mess Expense Tracker">
+<meta property="og:description" content="Track daily meals, split mess expenses, and manage member balances — free real-time web app for hostels and shared living groups.">
+<meta property="og:url" content="https://somrat99100.github.io/mess-manager-pro/">
+<meta property="og:site_name" content="Mess Manager Pro">
+<meta property="og:image" content="https://somrat99100.github.io/mess-manager-pro/og-image.png">
+<meta property="og:locale" content="en_US">
+
+<!-- ============ TWITTER CARD ============ -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Mess Manager Pro | Hostel Meal & Mess Expense Tracker">
+<meta name="twitter:description" content="Track daily meals, split mess expenses, and manage member balances — free real-time web app for hostels and shared living groups.">
+<meta name="twitter:image" content="https://somrat99100.github.io/mess-manager-pro/og-image.png">
+
+<!-- ============ FAVICON (fork & spoon, inline SVG, no external file needed) ============ -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%232d5016'/%3E%3Cg fill='none' stroke='%23f9f6f3' stroke-width='6' stroke-linecap='round'%3E%3Cline x1='32' y1='18' x2='32' y2='50'/%3E%3Cline x1='24' y1='18' x2='24' y2='34'/%3E%3Cline x1='40' y1='18' x2='40' y2='34'/%3E%3Cpath d='M24 34 Q24 50 32 50 Q40 50 40 34'/%3E%3Cline x1='32' y1='50' x2='32' y2='84'/%3E%3Cpath d='M68 18 C58 18 58 32 63 40 C66 45 68 46 68 52 L68 84'/%3E%3C/g%3E%3C/svg%3E">
+<meta name="theme-color" content="#2d5016">
+
+<!-- ============ STRUCTURED DATA (JSON-LD) ============ -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebApplication",
+  "name": "Mess Manager Pro",
+  "applicationCategory": "FinanceApplication",
+  "operatingSystem": "Any (Web-based)",
+  "description": "Track daily meals, split mess expenses, and manage member balances in real time for hostel and shared-living groups.",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  },
+  "url": "https://somrat99100.github.io/mess-manager-pro/"
+}
+</script>
+
+<!-- ============ FONTS ============ -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,500&family=Work+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<!-- ============ FIREBASE (compat SDK) ============ -->
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- ============================================================
+     HOMEPAGE
+============================================================ -->
+<div id="homepage">
+  <nav class="nav">
+    <div class="wrap">
+      <div class="brand">
+        <svg viewBox="0 0 100 100"><rect width="100" height="100" rx="22" fill="#2d5016"/><g fill="none" stroke="#f9f6f3" stroke-width="6" stroke-linecap="round"><line x1="32" y1="18" x2="32" y2="50"/><line x1="24" y1="18" x2="24" y2="34"/><line x1="40" y1="18" x2="40" y2="34"/><path d="M24 34 Q24 50 32 50 Q40 50 40 34"/><line x1="32" y1="50" x2="32" y2="84"/><path d="M68 18 C58 18 58 32 63 40 C66 45 68 46 68 52 L68 84"/></g></svg>
+        Mess Manager Pro
+      </div>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#how-it-works">How it works</a>
+        <a href="#" onclick="showAuth('login'); return false;">Log in</a>
+        <a href="#" class="btn small terra" onclick="showAuth('register'); return false;">Get started</a>
+      </div>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="wrap">
+      <div>
+        <div class="eyebrow">Built for hostels &amp; shared kitchens</div>
+        <h1>Split the <em>rice</em>, the <em>fish</em>, and the fuss — not the friendship.</h1>
+        <p class="lead">Mess Manager Pro replaces the meal-count notebook and the expense spreadsheet with one shared, real-time app. Every member sees their own meals and balance; one manager keeps the books straight for everyone.</p>
+        <div class="hero-ctas">
+          <button class="btn terra" onclick="showAuth('register')">Create your mess — it's free</button>
+          <button class="btn outline" onclick="showAuth('login')">I already have an account</button>
+        </div>
+        <div class="materials-strip" style="justify-content:flex-start; padding-top:28px;">
+          <span>🐟 fish</span><span>🥦 vegetables</span><span>🍚 rice</span><span>🧂 spices</span><span>🍗 meat</span>
+        </div>
+      </div>
+      <div class="hero-visual">
+        <div class="plate">
+          <div class="ring"></div>
+          <svg class="plate-icon" viewBox="0 0 100 100"><g fill="none" stroke="#2d5016" stroke-width="4" stroke-linecap="round"><line x1="32" y1="14" x2="32" y2="56"/><line x1="22" y1="14" x2="22" y2="34"/><line x1="42" y1="14" x2="42" y2="34"/><path d="M22 34 Q22 56 32 56 Q42 56 42 34"/><line x1="32" y1="56" x2="32" y2="90"/><path d="M70 14 C58 14 58 30 64 40 C67 46 70 47 70 54 L70 90"/></g></svg>
+        </div>
+        <div class="float-tag t1"><span class="dot"></span> Lunch marked ON</div>
+        <div class="float-tag t2">📊 Balance: ৳352</div>
+      </div>
+    </div>
+  </header>
+
+  <section class="section" id="features">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="eyebrow">What it does</div>
+        <h2>Everything your meal register did — now shared, live, and automatic</h2>
+        <p>Every calculation your Excel sheet used to do by hand happens instantly, for everyone in the mess.</p>
+      </div>
+      <div class="feat-grid">
+        <div class="card feat-card">
+          <div class="feat-icon">🗓️</div>
+          <h3>Daily meal log</h3>
+          <p>Lunch and dinner toggles for every member, defaulting ON — just switch OFF when someone's away.</p>
+        </div>
+        <div class="card feat-card">
+          <div class="feat-icon">💸</div>
+          <h3>Expense tracking</h3>
+          <p>Log every purchase by category — fish, vegetables, spices, groceries — with running totals.</p>
+        </div>
+        <div class="card feat-card">
+          <div class="feat-icon">📊</div>
+          <h3>Live dashboard</h3>
+          <p>Total collection, total expense, meal rate, and remaining fund — recalculated the moment anything changes.</p>
+        </div>
+        <div class="card feat-card">
+          <div class="feat-icon">🧑‍🤝‍🧑</div>
+          <h3>Member balances</h3>
+          <p>Each member's deposit minus their meal cost, so who owes what is never a guessing game.</p>
+        </div>
+        <div class="card feat-card">
+          <div class="feat-icon">🔐</div>
+          <h3>Two roles, one account</h3>
+          <p>Every manager is still a member of their own mess — their meals count too. Members get a simpler, focused view.</p>
+        </div>
+        <div class="card feat-card">
+          <div class="feat-icon">📱</div>
+          <h3>Works everywhere</h3>
+          <p>Phone, tablet, or laptop — the whole mess can check balances without asking anyone for the sheet.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="how-it-works" style="background:var(--cream-deep);">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="eyebrow">How it works</div>
+        <h2>From empty account to running mess in five steps</h2>
+      </div>
+      <div class="steps card" style="padding:10px 32px;">
+        <div class="step">
+          <div class="step-num">01</div>
+          <div>
+            <h3>Create your account</h3>
+            <p>Sign up with your name, email, and a password. This is your one login — it can hold both a member profile and, later, a manager profile.</p>
+            <span class="who">Everyone</span>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">02</div>
+          <div>
+            <h3>Create or join a mess</h3>
+            <p>Start a new mess (you become its manager automatically) or enter the invite code a friend shares with you to join theirs as a member.</p>
+            <span class="who">Everyone</span>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">03</div>
+          <div>
+            <h3>Set the meal deadline</h3>
+            <p>As manager, choose the daily cutoff time (e.g. 10 PM) after which meal counts lock for the next day — matching how a real mess plans its shopping.</p>
+            <span class="who">Manager</span>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">04</div>
+          <div>
+            <h3>Members toggle their own meals</h3>
+            <p>Before the deadline, each member switches their own lunch/dinner ON or OFF. After the deadline, only the manager can adjust it.</p>
+            <span class="who">Member</span>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">05</div>
+          <div>
+            <h3>Manager logs expenses, everyone sees balances</h3>
+            <p>The manager records purchases as they happen. The dashboard recalculates meal rate and every member's balance automatically.</p>
+            <span class="who">Manager</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <div class="cta-band">
+        <h2>Your mess deserves better than a shared spreadsheet</h2>
+        <p>Free to start. No app to install. Just a link everyone in your mess can open.</p>
+        <button class="btn terra" onclick="showAuth('register')">Create your mess now</button>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap">
+      <div class="brand" style="font-size:15px;">
+        <svg viewBox="0 0 100 100" style="width:22px;height:22px;"><rect width="100" height="100" rx="22" fill="#2d5016"/><g fill="none" stroke="#f9f6f3" stroke-width="7" stroke-linecap="round"><line x1="32" y1="18" x2="32" y2="50"/><line x1="24" y1="18" x2="24" y2="34"/><line x1="40" y1="18" x2="40" y2="34"/><path d="M24 34 Q24 50 32 50 Q40 50 40 34"/><line x1="32" y1="50" x2="32" y2="84"/><path d="M68 18 C58 18 58 32 63 40 C66 45 68 46 68 52 L68 84"/></g></svg>
+        Mess Manager Pro
+      </div>
+      <p class="fine">Built for hostel &amp; roommate mess groups. &copy; <span id="year"></span> Mess Manager Pro.</p>
+    </div>
+  </footer>
+</div>
+
+<!-- ============================================================
+     AUTH SCREEN
+============================================================ -->
+<div id="authScreen" class="hidden">
+  <div class="card auth-card">
+    <a href="#" class="back-home" onclick="showHomepage(); return false;">&larr; Back to homepage</a>
+    <div class="brand"><svg viewBox="0 0 100 100" style="width:32px;height:32px;"><rect width="100" height="100" rx="22" fill="#2d5016"/><g fill="none" stroke="#f9f6f3" stroke-width="6" stroke-linecap="round"><line x1="32" y1="18" x2="32" y2="50"/><line x1="24" y1="18" x2="24" y2="34"/><line x1="40" y1="18" x2="40" y2="34"/><path d="M24 34 Q24 50 32 50 Q40 50 40 34"/><line x1="32" y1="50" x2="32" y2="84"/><path d="M68 18 C58 18 58 32 63 40 C66 45 68 46 68 52 L68 84"/></g></svg></div>
+
+    <div id="loginForm">
+      <h2>Welcome back</h2>
+      <p class="sub">Log in to your mess account</p>
+      <div id="loginError" class="auth-error hidden"></div>
+      <div class="field"><label>Email</label><input type="email" id="loginEmail" autocomplete="email"></div>
+      <div class="field"><label>Password</label><input type="password" id="loginPassword" autocomplete="current-password"></div>
+      <button class="btn terra" style="width:100%;" onclick="doLogin()">Log in</button>
+      <div class="auth-toggle">New here? <button onclick="showAuth('register')">Create an account</button></div>
+    </div>
+
+    <div id="registerForm" class="hidden">
+      <h2>Create your account</h2>
+      <p class="sub">One account, one login — a member profile and (if you start a mess) a manager profile too.</p>
+      <div id="registerError" class="auth-error hidden"></div>
+      <div class="field"><label>Full name</label><input type="text" id="regName" autocomplete="name"></div>
+      <div class="field"><label>Email</label><input type="email" id="regEmail" autocomplete="email"></div>
+      <div class="field"><label>Password (min 6 characters)</label><input type="password" id="regPassword" autocomplete="new-password"></div>
+      <button class="btn terra" style="width:100%;" onclick="doRegister()">Create account</button>
+      <div class="auth-toggle">Already have an account? <button onclick="showAuth('login')">Log in</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     APP SHELL
+============================================================ -->
+<div id="appShell">
+  <div class="appbar">
+    <div class="wrap">
+      <div class="brand"><svg viewBox="0 0 100 100"><rect width="100" height="100" rx="22" fill="#2d5016"/><g fill="none" stroke="#f9f6f3" stroke-width="6" stroke-linecap="round"><line x1="32" y1="18" x2="32" y2="50"/><line x1="24" y1="18" x2="24" y2="34"/><line x1="40" y1="18" x2="40" y2="34"/><path d="M24 34 Q24 50 32 50 Q40 50 40 34"/><line x1="32" y1="50" x2="32" y2="84"/><path d="M68 18 C58 18 58 32 63 40 C66 45 68 46 68 52 L68 84"/></g></svg>Mess Manager Pro</div>
+      <div class="appbar-right">
+        <span id="messNameChip" class="pill role"></span>
+        <div class="user-chip">
+          <div class="avatar" id="userAvatar">?</div>
+          <span id="userNameLabel"></span>
+        </div>
+        <button class="btn outline small" onclick="doLogout()">Log out</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- No-mess state -->
+  <div id="noMessState" class="app-content hidden">
+    <div class="wrap">
+      <div class="card panel" style="max-width:520px; margin:40px auto; text-align:center;">
+        <h3 style="margin-bottom:10px;">Let's get your mess set up</h3>
+        <p style="color:var(--ink-soft); margin-bottom:24px; font-size:14px;">Create a new mess (you'll be its manager) or join one with an invite code.</p>
+        <div style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap;">
+          <button class="btn terra" onclick="openModal('createMessModal')">Create a mess</button>
+          <button class="btn outline" onclick="openModal('joinMessModal')">Join with invite code</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main app -->
+  <div id="mainAppState" class="hidden">
+    <div class="tabbar">
+      <div class="wrap">
+        <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard')">📊 Dashboard</button>
+        <button class="tab-btn" data-tab="meals" onclick="switchTab('meals')">🗓️ Meals</button>
+        <button class="tab-btn" data-tab="expenses" onclick="switchTab('expenses')">💸 Expenses</button>
+        <button class="tab-btn" data-tab="members" onclick="switchTab('members')">🧑‍🤝‍🧑 Members</button>
+        <button class="tab-btn manager-only hidden" data-tab="settings" onclick="switchTab('settings')">⚙️ Mess Settings</button>
+        <button class="tab-btn" data-tab="profile" onclick="switchTab('profile')">👤 Profile</button>
+      </div>
+    </div>
+
+    <div class="app-content wrap">
+
+      <!-- DASHBOARD -->
+      <div id="tab-dashboard" class="tab-panel">
+
+        <!-- NOTICE BOARD -->
+        <div class="card notice-board">
+          <div class="notice-board-inner">
+            <div class="notice-eyebrow">📌 Notice board</div>
+            <blockquote id="noticeMain">
+              <p id="noticeMainText">No notices yet — be the first to post one.</p>
+              <footer id="noticeMainMeta"></footer>
+            </blockquote>
+            <button class="btn terra small" onclick="openModal('postNoticeModal')">Post a notice</button>
+          </div>
+          <div class="notice-history hidden" id="noticeHistoryWrap">
+            <div class="notice-history-head">Earlier notices</div>
+            <div id="noticeHistoryList"></div>
+          </div>
+        </div>
+
+        <div class="grid-4">
+          <div class="card metric-card"><span class="m-label">💰 Total Collection</span><span class="m-value mono" id="mTotalCollection">৳0</span></div>
+          <div class="card metric-card terra"><span class="m-label">💸 Total Expense</span><span class="m-value mono" id="mTotalExpense">৳0</span></div>
+          <div class="card metric-card"><span class="m-label">🍱 Total Meals</span><span class="m-value mono" id="mTotalMeals">0</span></div>
+          <div class="card metric-card good"><span class="m-label">📊 Meal Rate</span><span class="m-value mono" id="mMealRate">৳0</span></div>
+        </div>
+        <div class="grid-3">
+          <div class="card metric-card"><span class="m-label">🏦 Remaining Fund</span><span class="m-value mono" id="mFund">৳0</span></div>
+          <div class="card metric-card"><span class="m-label">📈 Fund Status</span><span class="m-value" id="mStatus">—</span></div>
+          <div class="card metric-card"><span class="m-label">🙋 My Balance</span><span class="m-value mono" id="mMyBalance">৳0</span></div>
+        </div>
+        <div class="card panel">
+          <div class="panel-head"><h3>Member balances at a glance</h3></div>
+          <div style="overflow-x:auto;"><table id="dashboardMemberTable"><thead><tr><th>Member</th><th>Deposit</th><th>☀️ Lunch</th><th>🌙 Dinner</th><th>👤 Guest</th><th>Total Meals</th><th>Cost</th><th>Balance</th><th>Status</th></tr></thead><tbody></tbody></table></div>
+        </div>
+      </div>
+
+      <!-- MEALS -->
+      <div id="tab-meals" class="tab-panel hidden">
+        <div class="card panel">
+          <div class="panel-head">
+            <h3>Daily meal log</h3>
+            <div style="display:flex; gap:10px; align-items:center;">
+              <input type="date" id="mealDatePicker" class="mono" style="padding:8px 12px; border:1.5px solid var(--line); border-radius:8px;">
+            </div>
+          </div>
+          <div id="deadlineNote" class="deadline-note hidden"></div>
+          <p class="manager-only hidden" style="font-size:12.5px; color:var(--ink-soft); margin-bottom:10px;">Guest meals: extra meals a member's guest ate that day — added to that member's meal count and cost. Manager-controlled.</p>
+          <div style="overflow-x:auto;"><table id="mealTable"><thead><tr><th>Member</th><th>☀️ Lunch</th><th>🌙 Dinner</th><th>👤 Guest meals</th></tr></thead><tbody></tbody></table></div>
+        </div>
+      </div>
+
+      <!-- EXPENSES -->
+      <div id="tab-expenses" class="tab-panel hidden">
+        <div class="card panel manager-only hidden">
+          <div class="panel-head"><h3>Add expense</h3></div>
+          <div class="grid-3">
+            <div class="field"><label>Category</label><input type="text" id="expCategory" placeholder="e.g. Fish, Rice, Vegetables"></div>
+            <div class="field"><label>Description</label><input type="text" id="expDesc" placeholder="Optional note"></div>
+            <div class="field"><label>Amount (৳)</label><input type="number" id="expAmount" placeholder="0"></div>
+          </div>
+          <button class="btn terra" onclick="addExpense()">Add expense</button>
+        </div>
+        <div class="card panel">
+          <div class="panel-head"><h3>All expenses</h3></div>
+          <div style="overflow-x:auto;"><table id="expenseTable"><thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Amount</th><th class="manager-only hidden"></th></tr></thead><tbody></tbody></table></div>
+        </div>
+      </div>
+
+      <!-- MEMBERS -->
+      <div id="tab-members" class="tab-panel hidden">
+        <div class="card panel manager-only hidden">
+          <div class="panel-head">
+            <h3>Invite members</h3>
+          </div>
+          <p style="font-size:14px; color:var(--ink-soft); margin-bottom:10px;">Share this invite code — anyone with a Mess Manager Pro account can join your mess with it:</p>
+          <div class="mono" id="inviteCodeDisplay" style="font-size:22px; font-weight:700; letter-spacing:.1em; color:var(--moss); background:var(--cream-deep); padding:14px; border-radius:10px; text-align:center;"></div>
+        </div>
+        <div class="card panel">
+          <div class="panel-head"><h3>Mess members</h3></div>
+          <div style="overflow-x:auto;"><table id="memberTable"><thead><tr><th>Name</th><th>Role</th><th>Deposit</th><th class="manager-only hidden">Actions</th></tr></thead><tbody></tbody></table></div>
+        </div>
+      </div>
+
+      <!-- SETTINGS (manager only) -->
+      <div id="tab-settings" class="tab-panel hidden">
+        <div class="card panel">
+          <div class="panel-head"><h3>Mess details</h3></div>
+          <div class="grid-3">
+            <div class="field"><label>Mess name</label><input type="text" id="setMessName"></div>
+            <div class="field"><label>Location</label><input type="text" id="setLocation"></div>
+            <div class="field"><label>Contact phone</label><input type="text" id="setPhone"></div>
+          </div>
+          <div class="field" style="max-width:220px;">
+            <label>Daily meal deadline (24h)</label>
+            <input type="time" id="setDeadline">
+          </div>
+          <button class="btn terra" onclick="saveMessSettings()">Save settings</button>
+        </div>
+        <div class="card panel">
+          <div class="panel-head"><h3>Set a member's deposit</h3></div>
+          <div class="grid-3">
+            <div class="field">
+              <label>Member</label>
+              <select id="depositMemberSelect"></select>
+            </div>
+            <div class="field"><label>New deposit (৳)</label><input type="number" id="depositAmount"></div>
+          </div>
+          <button class="btn outline" onclick="updateDeposit()">Update deposit</button>
+        </div>
+      </div>
+
+      <!-- PROFILE -->
+      <div id="tab-profile" class="tab-panel hidden">
+        <div class="card panel" style="max-width:480px;">
+          <div class="panel-head"><h3>My profile</h3></div>
+          <div class="field"><label>Name</label><input type="text" id="profName"></div>
+          <div class="field"><label>Email</label><input type="email" id="profEmail" disabled></div>
+          <button class="btn outline" onclick="saveProfile()">Save changes</button>
+          <hr style="border:none; border-top:1px solid var(--line); margin:22px 0;">
+          <p style="font-size:13px; color:var(--ink-soft);">Current mess: <strong id="profMessName">—</strong></p>
+          <p style="font-size:13px; color:var(--ink-soft);">My role: <strong id="profRole">—</strong></p>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ============ MODALS ============ -->
+<div class="modal-backdrop hidden" id="createMessModal">
+  <div class="card modal">
+    <h3>Create your mess</h3>
+    <div class="field"><label>Mess name</label><input type="text" id="newMessName" placeholder="e.g. Green Valley Hostel Mess"></div>
+    <div class="field"><label>Location</label><input type="text" id="newMessLocation" placeholder="e.g. Dhanmondi, Dhaka"></div>
+    <div class="field"><label>Daily meal deadline (24h)</label><input type="time" id="newMessDeadline" value="22:00"></div>
+    <div class="modal-actions">
+      <button class="btn outline small" onclick="closeModal('createMessModal')">Cancel</button>
+      <button class="btn terra small" onclick="createMess()">Create mess</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop hidden" id="joinMessModal">
+  <div class="card modal">
+    <h3>Join a mess</h3>
+    <div class="field"><label>Invite code</label><input type="text" id="joinCodeInput" placeholder="e.g. GVHM-7421" style="text-transform:uppercase;"></div>
+    <div class="modal-actions">
+      <button class="btn outline small" onclick="closeModal('joinMessModal')">Cancel</button>
+      <button class="btn terra small" onclick="joinMess()">Join mess</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop hidden" id="promoteModal">
+  <div class="card modal">
+    <h3 id="promoteModalTitle">Change member role</h3>
+    <p style="font-size:13.5px; color:var(--ink-soft); margin-bottom:14px;" id="promoteModalBody"></p>
+    <div class="modal-actions">
+      <button class="btn outline small" onclick="closeModal('promoteModal')">Cancel</button>
+      <button class="btn terra small" id="promoteConfirmBtn">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop hidden" id="postNoticeModal">
+  <div class="card modal">
+    <h3>Post a notice</h3>
+    <p style="font-size:13px; color:var(--ink-soft); margin-bottom:14px;">Visible to everyone in your mess right away — any member can post.</p>
+    <div class="field"><label>Notice or quote</label><textarea id="noticeTextInput" rows="4" style="width:100%; padding:12px 14px; border:1.5px solid var(--line); border-radius:10px; font-family:inherit; font-size:14.5px; background:var(--cream); resize:vertical;" placeholder="e.g. Bazar money due by Friday — please pay Sunny."></textarea></div>
+    <div class="modal-actions">
+      <button class="btn outline small" onclick="closeModal('postNoticeModal')">Cancel</button>
+      <button class="btn terra small" onclick="postNotice()">Post</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-wrap" id="toastWrap"></div>
+
+<script src="js/app.js"></script>
+</body>
+</html>
