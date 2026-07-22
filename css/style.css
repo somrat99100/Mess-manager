@@ -145,10 +145,20 @@ h1,h2,h3,h4{font-family:var(--font-display); font-weight:600; line-height:1.15; 
 .cta-band .btn.terra{}
 .cta-band .btn.outline{border-color:rgba(255,255,255,0.5); color:#fff;}
 
-footer{padding:50px 0 34px; border-top:1px solid var(--line); margin-top:40px;}
-footer .wrap{display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;}
-footer .brand{font-size:16px;}
-footer .fine{font-size:12.5px; color:var(--ink-soft);}
+footer{padding:56px 0 0; border-top:1px solid var(--line); margin-top:40px;}
+.footer-grid{display:grid; grid-template-columns:1.4fr 1fr 1.2fr; gap:32px; padding-bottom:36px;}
+.footer-col{display:flex; flex-direction:column; gap:10px;}
+.footer-desc{font-size:13px; color:var(--ink-soft); line-height:1.6; max-width:320px;}
+.footer-heading{font-family:var(--font-display); font-size:14px; font-weight:700; color:var(--ink); margin-bottom:2px;}
+.footer-col a{font-size:13.5px; color:var(--ink-soft); text-decoration:none; transition:color .15s ease;}
+.footer-col a:hover{color:var(--terracotta-dark);}
+.footer-contact-line{display:flex; align-items:center; gap:8px;}
+.footer-contact-line .fc-icon{font-size:14px;}
+.footer-bottom{padding:18px 0 34px; border-top:1px solid var(--line);}
+.footer-bottom .fine{font-size:12.5px; color:var(--ink-soft);}
+@media (max-width:760px){
+  .footer-grid{grid-template-columns:1fr; gap:26px;}
+}
 
 @media (max-width:860px){
   .hero .wrap{grid-template-columns:1fr;}
@@ -254,6 +264,13 @@ footer .fine{font-size:12.5px; color:var(--ink-soft);}
 .metric-item.good .mi-value{color:var(--good);}
 .metric-item.mine{background:linear-gradient(135deg, rgba(45,80,22,0.07), rgba(217,119,87,0.07)); border-color:transparent;}
 .metric-item.mine .mi-icon{background:var(--moss); color:#fff; border-color:var(--moss);}
+.metric-item.cycle-metric{grid-column:span 2;}
+.metric-item.cycle-metric .mi-icon{background:#fdf6ec; border-color:#f0dfc0;}
+#mCycle{display:flex; align-items:center; flex-wrap:wrap; gap:6px; font-family:var(--font-mono); font-size:14px; font-weight:600; letter-spacing:.01em;}
+#mCycle .cycle-date{background:var(--cream-deep); border-radius:6px; padding:2px 8px;}
+#mCycle .cycle-arrow{color:var(--terracotta-dark); font-weight:700; font-size:13px;}
+#mCycle .cycle-empty{color:var(--ink-soft); font-family:var(--font-body); font-weight:500; font-size:14px;}
+@media (max-width:640px){ .metric-item.cycle-metric{grid-column:span 1;} }
 @keyframes valuePulse{0%{transform:scale(1);} 35%{transform:scale(1.15); color:var(--terracotta-dark);} 100%{transform:scale(1);}}
 .mi-value.flash{animation:valuePulse .5s ease;}
 
