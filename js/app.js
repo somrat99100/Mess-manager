@@ -28,6 +28,7 @@ let currentMessDoc = null;    // mess/{messId}
 let myRole = null;            // 'manager' | 'member'
 let messMembers = [];         // array of messMembers docs (with id)
 let messMealOffRequests = []; // array of mealOffRequests docs for this mess (with id), all statuses
+let messGuestRequests = [];   // array of guestRequests docs for this mess (with id), all statuses
 let unsubscribers = [];
 
 /* ---------- utils ---------- */
@@ -39,6 +40,15 @@ function toast(msg, type){
   setTimeout(()=> el.remove(), 3800);
 }
 function money(n){ return '৳' + (Number(n)||0).toLocaleString('en-BD', {maximumFractionDigits:2}); }
+function setMetric(id, text){
+  const el = document.getElementById(id);
+  if(!el) return;
+  const changed = el.textContent !== String(text);
+  el.textContent = text;
+  if(changed){
+    el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
+  }
+}
 function todayStr(){ const d = new Date(); return d.toISOString().slice(0,10); }
 function openModal(id){ document.getElementById(id).classList.remove('hidden'); }
 function closeModal(id){ document.getElementById(id).classList.add('hidden'); }
@@ -242,10 +252,20 @@ function attachMessListeners(){
   const reqSub = db.collection('mealOffRequests').where('messId','==', currentMessId).onSnapshot(snap => {
     messMealOffRequests = snap.docs.map(d => ({id:d.id, ...d.data({serverTimestamps: 'estimate'})}));
     renderRequestsPanel();
+    updateMealsTabBadge();
     const dateNow = document.getElementById('mealDatePicker').value || todayStr();
     renderMealCards(dateNow);
   }, e => toast('Could not load meal-off requests: ' + e.message, 'err'));
   unsubscribers.push(reqSub);
+
+  const guestReqSub = db.collection('guestRequests').where('messId','==', currentMessId).onSnapshot(snap => {
+    messGuestRequests = snap.docs.map(d => ({id:d.id, ...d.data({serverTimestamps: 'estimate'})}));
+    renderRequestsPanel();
+    updateMealsTabBadge();
+    const dateNow = document.getElementById('mealDatePicker').value || todayStr();
+    renderMealCards(dateNow);
+  }, e => toast('Could not load guest requests: ' + e.message, 'err'));
+  unsubscribers.push(guestReqSub);
 
   const noticeSub = db.collection('notices').where('messId','==', currentMessId).onSnapshot(snap => {
     const notices = snap.docs.map(d => ({id:d.id, ...d.data({serverTimestamps: 'estimate'})}))
@@ -265,6 +285,14 @@ function attachMessListeners(){
 /* ============================================================
    TAB SWITCHING
 ============================================================ */
+function updateMealsTabBadge(){
+  const badge = document.getElementById('mealsTabBadge');
+  if(!badge) return;
+  if(myRole !== 'manager'){ badge.classList.add('hidden'); return; }
+  const count = messMealOffRequests.filter(r=>r.status==='pending').length + messGuestRequests.filter(r=>r.status==='pending').length;
+  badge.textContent = count;
+  badge.classList.toggle('hidden', count === 0);
+}
 function switchTab(tab){
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('hidden', p.id !== 'tab-' + tab));
@@ -319,10 +347,12 @@ function renderMealDeadlineNote(){
   }
 }
 
+let mealDocUnsub = null; // live listener for the currently-viewed date's meals doc
 function loadMealsForDate(dateStr){
   if(!currentMessId || !dateStr) return;
+  if(mealDocUnsub){ mealDocUnsub(); mealDocUnsub = null; }
   const mealId = currentMessId + '_' + dateStr;
-  db.collection('meals').doc(mealId).get().then(doc => {
+  mealDocUnsub = db.collection('meals').doc(mealId).onSnapshot(doc => {
     const data = doc.exists ? doc.data() : {members: {}, dayOff: false};
     currentMealsCache = data.members || {};
     currentDayOff = !!data.dayOff;
@@ -330,7 +360,8 @@ function loadMealsForDate(dateStr){
     renderMealDeadlineNote();
     renderDayOffSwitch();
     renderDaySummary(dateStr);
-  });
+  }, e => toast('Could not load meals: ' + e.message, 'err'));
+  unsubscribers.push(mealDocUnsub);
 }
 
 function formatDateLabel(dateStr){
@@ -393,12 +424,6 @@ function toggleDayOff(){
     updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
     updatedBy: currentUser.uid
   }, {merge: true}).then(()=>{
-    currentDayOff = newDayOff;
-    currentMealsCache = updatedMembers;
-    renderMealCards(dateStr);
-    renderMealDeadlineNote();
-    renderDayOffSwitch();
-    renderDaySummary(dateStr);
     renderDashboard();
     toast(newDayOff ? 'Meals switched OFF for this day' : 'Meals switched back ON for this day', 'ok');
   }).catch(e => toast(e.message, 'err'));
@@ -410,14 +435,22 @@ function renderMealCards(dateStr){
   wrap.innerHTML = '';
   const isManager = myRole === 'manager';
   const isPastDay = dateStr < todayStr();
-  const pendingForDate = messMealOffRequests.filter(r => r.date === dateStr && r.status === 'pending');
+  const pendingOffForDate = messMealOffRequests.filter(r => r.date === dateStr && r.status === 'pending');
+  const pendingGuestForDate = messGuestRequests.filter(r => r.date === dateStr && r.status === 'pending');
 
   if(!messMembers.length){
     wrap.innerHTML = `<div class="empty-state">No members in this mess yet.</div>`;
     return;
   }
 
-  messMembers.forEach(mem => {
+  // Manager is a member too — pin their own row first so their own meals are always front and centre.
+  const ordered = [...messMembers].sort((a,b) => {
+    if(a.userId === currentUser.uid) return -1;
+    if(b.userId === currentUser.uid) return 1;
+    return 0;
+  });
+
+  ordered.forEach(mem => {
     const rec = currentMealsCache[mem.userId] || {lunch:true, dinner:true, guest:0}; // default ON, 0 guests
     const guestCount = rec.guest || 0;
     const isSelf = mem.userId === currentUser.uid;
@@ -431,8 +464,9 @@ function renderMealCards(dateStr){
       ? (!currentDayOff && !isPastDay)
       : (isSelf && !currentDayOff && isBeforeDeadlineFor(dateStr, 'dinner'));
 
-    const lunchPending = pendingForDate.find(r => r.memberId === mem.userId && r.mealType === 'lunch');
-    const dinnerPending = pendingForDate.find(r => r.memberId === mem.userId && r.mealType === 'dinner');
+    const lunchPending = pendingOffForDate.find(r => r.memberId === mem.userId && r.mealType === 'lunch');
+    const dinnerPending = pendingOffForDate.find(r => r.memberId === mem.userId && r.mealType === 'dinner');
+    const guestPending = pendingGuestForDate.find(r => r.memberId === mem.userId);
 
     // Deadline passed but meal is still ON: the member can ask the manager to turn it off instead.
     const canRequestLunch = !isManager && isSelf && !currentDayOff && !isPastDay && rec.lunch && !canEditLunch && !lunchPending;
@@ -450,20 +484,26 @@ function renderMealCards(dateStr){
         ? `<button class="btn-request-off" onclick="requestMealOff('${dateStr}','dinner')">Request off</button>`
         : `<button class="meal-toggle ${rec.dinner ? 'on':''}" ${canEditDinner?'':'disabled'} onclick="toggleMeal('${dateStr}','${mem.userId}','dinner')"><span class="knob"></span></button>`;
 
+    // Guest meals — manager taps a member's chip to set the exact count directly; a member taps
+    // their own chip to request guest meals be added (goes to the manager for approval).
+    let guestCell;
+    if(guestPending){
+      guestCell = `<span class="request-pending-badge">+${guestPending.count} pending</span>`;
+    } else if(isManager && !currentDayOff && !isPastDay){
+      guestCell = `<button class="guest-chip ${guestCount===0?'zero':''}" onclick="openGuestSetModal('${dateStr}','${mem.userId}','${esc(mem.name)}',${guestCount})">👤 ${guestCount}</button>`;
+    } else if(!isManager && isSelf && !currentDayOff && !isPastDay){
+      guestCell = `<button class="guest-chip ${guestCount===0?'zero':''}" onclick="openGuestRequestModal('${dateStr}')">👤 ${guestCount} <span class="g-plus">+ add</span></button>`;
+    } else {
+      guestCell = `<span class="guest-chip zero" style="cursor:default;">👤 ${guestCount}</span>`;
+    }
+
     const row = document.createElement('div');
-    row.className = 'meal-card-row';
+    row.className = 'meal-card-row' + (isSelf ? ' mc-self' : '');
     row.innerHTML = `
-      <div class="mc-name">${esc(mem.name)} ${mem.role==='manager' ? '<span class="pill role">Manager</span>' : ''}</div>
+      <div class="mc-name">${esc(mem.name)} ${isSelf ? '<span class="pill you">You</span>' : ''} ${mem.role==='manager' ? '<span class="pill role">Manager</span>' : ''}</div>
       <div class="mc-col"><span class="mc-col-label">☀️ Lunch</span>${lunchCell}</div>
       <div class="mc-col"><span class="mc-col-label">🌙 Dinner</span>${dinnerCell}</div>
-      <div class="mc-col">
-        <span class="mc-col-label">👤 Guest</span>
-        <div class="guest-stepper">
-          <button ${isManager && !currentDayOff && !isPastDay ? '' : 'disabled'} onclick="setGuestMeals('${dateStr}','${mem.userId}',${guestCount - 1})">−</button>
-          <span>${guestCount}</span>
-          <button ${isManager && !currentDayOff && !isPastDay ? '' : 'disabled'} onclick="setGuestMeals('${dateStr}','${mem.userId}',${guestCount + 1})">+</button>
-        </div>
-      </div>
+      <div class="mc-col"><span class="mc-col-label">👤 Guest</span>${guestCell}</div>
     `;
     wrap.appendChild(row);
   });
@@ -489,22 +529,15 @@ function approveMealOffRequest(reqId){
   const req = messMealOffRequests.find(r => r.id === reqId);
   if(!req) return;
   const mealId = currentMessId + '_' + req.date;
-  const mealRef = db.collection('meals').doc(mealId);
-  const reqRef = db.collection('mealOffRequests').doc(reqId);
-  db.runTransaction(tx => tx.get(mealRef).then(doc => {
-    const data = doc.exists ? doc.data() : {members: {}};
-    const members = data.members || {};
-    const current = members[req.memberId] || {lunch:true, dinner:true, guest:0};
-    tx.set(mealRef, {
-      messId: currentMessId, date: req.date,
-      members: { [req.memberId]: { ...current, [req.mealType]: false } },
-      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-      updatedBy: currentUser.uid
-    }, {merge: true});
-    tx.update(reqRef, { status: 'approved', respondedAt: firebase.firestore.FieldValue.serverTimestamp(), respondedBy: currentUser.uid });
+  db.collection('meals').doc(mealId).set({
+    messId: currentMessId, date: req.date,
+    members: { [req.memberId]: { [req.mealType]: false } },
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    updatedBy: currentUser.uid
+  }, {merge: true}).then(()=> db.collection('mealOffRequests').doc(reqId).update({
+    status: 'approved', respondedAt: firebase.firestore.FieldValue.serverTimestamp(), respondedBy: currentUser.uid
   })).then(()=>{
     toast(`${req.memberName}'s ${req.mealType} marked off`, 'ok');
-    loadMealsForDate(document.getElementById('mealDatePicker').value || todayStr());
     renderDashboard();
   }).catch(e => toast(e.message, 'err'));
 }
@@ -518,26 +551,109 @@ function rejectMealOffRequest(reqId){
   }).then(()=> toast('Request declined', 'ok')).catch(e => toast(e.message, 'err'));
 }
 
+/* ---------- guest-meal requests: member asks for guest meals to be added, manager approves/declines ---------- */
+let guestRequestDate = null; // set when the "request guest meals" modal opens
+function openGuestRequestModal(dateStr){
+  guestRequestDate = dateStr;
+  document.getElementById('guestRequestModalSub').textContent = `For ${formatDateLabel(dateStr)}. Your manager will review and approve this.`;
+  document.getElementById('guestRequestCount').value = 1;
+  openModal('guestRequestModal');
+}
+function submitGuestRequest(){
+  const count = Number(document.getElementById('guestRequestCount').value);
+  if(!guestRequestDate || !count || count <= 0){ toast('Enter how many guest meals you need', 'err'); return; }
+  const already = messGuestRequests.find(r => r.date === guestRequestDate && r.memberId === currentUser.uid && r.status === 'pending');
+  if(already){ toast('You already have a pending guest-meal request for this day.', 'err'); closeModal('guestRequestModal'); return; }
+  db.collection('guestRequests').add({
+    messId: currentMessId, date: guestRequestDate, count,
+    memberId: currentUser.uid, memberName: currentUserDoc.name,
+    status: 'pending',
+    requestedAt: firebase.firestore.FieldValue.serverTimestamp()
+  }).then(()=>{
+    closeModal('guestRequestModal');
+    toast('Guest-meal request sent to your manager', 'ok');
+  }).catch(e => toast(e.message, 'err'));
+}
+function approveGuestRequest(reqId){
+  if(myRole !== 'manager') return;
+  const req = messGuestRequests.find(r => r.id === reqId);
+  if(!req) return;
+  const mealId = currentMessId + '_' + req.date;
+  db.collection('meals').doc(mealId).set({
+    messId: currentMessId, date: req.date,
+    members: { [req.memberId]: { guest: firebase.firestore.FieldValue.increment(req.count) } },
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    updatedBy: currentUser.uid
+  }, {merge: true}).then(()=> db.collection('guestRequests').doc(reqId).update({
+    status: 'approved', respondedAt: firebase.firestore.FieldValue.serverTimestamp(), respondedBy: currentUser.uid
+  })).then(()=>{
+    toast(`Added ${req.count} guest meal(s) for ${req.memberName}`, 'ok');
+    renderDashboard();
+  }).catch(e => toast(e.message, 'err'));
+}
+function rejectGuestRequest(reqId){
+  if(myRole !== 'manager') return;
+  db.collection('guestRequests').doc(reqId).update({
+    status: 'rejected',
+    respondedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    respondedBy: currentUser.uid
+  }).then(()=> toast('Request declined', 'ok')).catch(e => toast(e.message, 'err'));
+}
+
+/* ---------- manager: set a member's exact guest-meal count directly, any day that isn't past ---------- */
+let guestSetContext = null; // {dateStr, memberId}
+function openGuestSetModal(dateStr, memberId, memberName, currentCount){
+  guestSetContext = {dateStr, memberId};
+  document.getElementById('guestSetModalTitle').textContent = `Guest meals — ${memberName}`;
+  document.getElementById('guestSetModalSub').textContent = `For ${formatDateLabel(dateStr)}.`;
+  document.getElementById('guestSetCount').value = currentCount;
+  openModal('guestSetModal');
+}
+function submitGuestSet(){
+  if(!guestSetContext) return;
+  const count = Number(document.getElementById('guestSetCount').value);
+  if(isNaN(count) || count < 0){ toast('Enter a valid guest count', 'err'); return; }
+  setGuestMeals(guestSetContext.dateStr, guestSetContext.memberId, count);
+  closeModal('guestSetModal');
+}
+
 function renderRequestsPanel(){
   const list = document.getElementById('requestsList');
   if(!list || myRole !== 'manager') return;
-  const pending = messMealOffRequests.filter(r => r.status === 'pending').sort((a,b)=> (a.date||'').localeCompare(b.date||''));
+  const offPending = messMealOffRequests.filter(r => r.status === 'pending').map(r => ({...r, kind:'off'}));
+  const guestPending = messGuestRequests.filter(r => r.status === 'pending').map(r => ({...r, kind:'guest'}));
+  const pending = [...offPending, ...guestPending].sort((a,b)=> (a.date||'').localeCompare(b.date||''));
   if(!pending.length){
     list.innerHTML = `<p style="font-size:13px; color:var(--ink-soft);">No pending requests right now.</p>`;
     return;
   }
-  list.innerHTML = pending.map(r => `
-    <div class="request-row">
-      <div class="request-info">
-        <strong>${esc(r.memberName)}</strong> wants ${esc(r.mealType)} off on ${esc(formatDateLabel(r.date))}
-        <span class="r-meta">Requested ${r.requestedAt ? timeAgo(r.requestedAt.toDate()) : 'just now'}</span>
-      </div>
-      <div class="request-actions">
-        <button class="btn tiny approve" onclick="approveMealOffRequest('${r.id}')">Approve</button>
-        <button class="btn tiny reject" onclick="rejectMealOffRequest('${r.id}')">Decline</button>
-      </div>
-    </div>
-  `).join('');
+  list.innerHTML = pending.map(r => {
+    const when = r.requestedAt ? timeAgo(r.requestedAt.toDate()) : 'just now';
+    if(r.kind === 'off'){
+      return `
+      <div class="request-row">
+        <div class="request-info">
+          <span class="request-tag off">Off</span><strong>${esc(r.memberName)}</strong> wants ${esc(r.mealType)} off on ${esc(formatDateLabel(r.date))}
+          <span class="r-meta">Requested ${when}</span>
+        </div>
+        <div class="request-actions">
+          <button class="btn tiny approve" onclick="approveMealOffRequest('${r.id}')">Approve</button>
+          <button class="btn tiny reject" onclick="rejectMealOffRequest('${r.id}')">Decline</button>
+        </div>
+      </div>`;
+    }
+    return `
+      <div class="request-row">
+        <div class="request-info">
+          <span class="request-tag guest">Guest</span><strong>${esc(r.memberName)}</strong> wants +${r.count} guest meal(s) on ${esc(formatDateLabel(r.date))}
+          <span class="r-meta">Requested ${when}</span>
+        </div>
+        <div class="request-actions">
+          <button class="btn tiny approve" onclick="approveGuestRequest('${r.id}')">Approve</button>
+          <button class="btn tiny reject" onclick="rejectGuestRequest('${r.id}')">Decline</button>
+        </div>
+      </div>`;
+  }).join('');
 }
 
 function toggleMeal(dateStr, memberId, type){
@@ -555,39 +671,29 @@ function toggleMeal(dateStr, memberId, type){
   const mealId = currentMessId + '_' + dateStr;
   const current = currentMealsCache[memberId] || {lunch:true, dinner:true, guest:0};
   const newVal = !current[type];
-  const ref = db.collection('meals').doc(mealId);
-  ref.set({
+  db.collection('meals').doc(mealId).set({
     messId: currentMessId, date: dateStr,
-    members: { [memberId]: { ...current, [type]: newVal } },
+    members: { [memberId]: { [type]: newVal } },
     updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
     updatedBy: currentUser.uid
-  }, {merge: true}).then(()=>{
-    currentMealsCache[memberId] = { ...current, [type]: newVal };
-    renderMealCards(dateStr);
-    renderDaySummary(dateStr);
-    renderDashboard();
-  }).catch(e => toast(e.message, 'err'));
+  }, {merge: true}).then(()=> renderDashboard()).catch(e => toast(e.message, 'err'));
 }
 
 // Guest meals: extra meals eaten by a member's guest on a given day.
-// Manager-controlled since it directly affects shared cost distribution.
+// Manager sets the exact count directly (via the guest-set modal); members request additions instead.
 function setGuestMeals(dateStr, memberId, newCount){
-  if(myRole !== 'manager'){ toast('Only the manager can add guest meals.', 'err'); return; }
+  if(myRole !== 'manager'){ toast('Only the manager can set guest meals directly — send a request instead.', 'err'); return; }
   if(dateStr < todayStr()){ toast('Past days can\u2019t be edited.', 'err'); return; }
   if(newCount < 0) newCount = 0;
   const mealId = currentMessId + '_' + dateStr;
-  const current = currentMealsCache[memberId] || {lunch:true, dinner:true, guest:0};
-  const ref = db.collection('meals').doc(mealId);
-  ref.set({
+  db.collection('meals').doc(mealId).set({
     messId: currentMessId, date: dateStr,
-    members: { [memberId]: { ...current, guest: newCount } },
+    members: { [memberId]: { guest: newCount } },
     updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
     updatedBy: currentUser.uid
   }, {merge: true}).then(()=>{
-    currentMealsCache[memberId] = { ...current, guest: newCount };
-    renderMealCards(dateStr);
-    renderDaySummary(dateStr);
     renderDashboard();
+    toast('Guest meals updated', 'ok');
   }).catch(e => toast(e.message, 'err'));
 }
 
@@ -643,8 +749,9 @@ function renderMemberTable(){
   messMembers.forEach(mem => {
     const tr = document.createElement('tr');
     const isSelf = mem.userId === currentUser.uid;
+    if(isSelf) tr.style.background = 'var(--cream)';
     tr.innerHTML = `
-      <td>${esc(mem.name)}</td>
+      <td>${esc(mem.name)} ${isSelf ? '<span class="pill you">You</span>' : ''}</td>
       <td><span class="pill role">${mem.role}</span></td>
       <td class="mono">${money(mem.deposit)}</td>
       <td class="manager-only hidden">
@@ -756,16 +863,21 @@ function formatDateTime(date){
   return date.toLocaleString('en-GB', {day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit'});
 }
 
+let latestNotices = []; // cached for the "see all" modal
+
 function renderNoticeBoard(notices){
+  latestNotices = notices;
   const mainText = document.getElementById('noticeMainText');
   const mainMeta = document.getElementById('noticeMainMeta');
   const historyWrap = document.getElementById('noticeHistoryWrap');
   const historyList = document.getElementById('noticeHistoryList');
+  const seeAllBtn = document.getElementById('seeAllNoticesBtn');
 
   if(!notices.length){
     mainText.textContent = 'No notices yet — be the first to post one.';
     mainMeta.textContent = '';
     historyWrap.classList.add('hidden');
+    seeAllBtn.classList.add('hidden');
     return;
   }
   const latest = notices[0];
@@ -773,16 +885,22 @@ function renderNoticeBoard(notices){
   mainText.textContent = '“' + latest.text + '”';
   mainMeta.textContent = '— ' + latest.authorName + ' · ' + formatDateTime(latestDate) + ' (' + timeAgo(latestDate) + ')';
 
-  const rest = notices.slice(1);
+  const rest = notices.slice(1, 4); // last 3 only — full list lives behind "See all"
   if(rest.length){
     historyWrap.classList.remove('hidden');
-    historyList.innerHTML = rest.map(n => {
-      const d = n.createdAt ? n.createdAt.toDate() : null;
-      return `<div class="notice-item"><span>${esc(n.text)} — <em>${esc(n.authorName)}</em></span><span class="n-meta">${d ? formatDateTime(d) : timeAgo(d)}</span></div>`;
-    }).join('');
+    historyList.innerHTML = rest.map(n => noticeItemHtml(n)).join('');
   } else {
     historyWrap.classList.add('hidden');
   }
+  seeAllBtn.classList.toggle('hidden', notices.length <= 4);
+}
+function noticeItemHtml(n){
+  const d = n.createdAt ? n.createdAt.toDate() : null;
+  return `<div class="notice-item"><span>${esc(n.text)} — <em>${esc(n.authorName)}</em></span><span class="n-meta">${d ? formatDateTime(d) : timeAgo(d)}</span></div>`;
+}
+function openAllNoticesModal(){
+  document.getElementById('allNoticesList').innerHTML = latestNotices.map(n => noticeItemHtml(n)).join('');
+  openModal('allNoticesModal');
 }
 
 function postNotice(){
@@ -835,11 +953,11 @@ function renderDashboard(expensesArg){
       const mealRate = totalMeals > 0 ? totalExpense / totalMeals : 0;
       const fund = totalDeposit - totalExpense;
 
-      document.getElementById('mTotalCollection').textContent = money(totalDeposit);
-      document.getElementById('mTotalExpense').textContent = money(totalExpense);
-      document.getElementById('mTotalMeals').textContent = totalMeals;
-      document.getElementById('mMealRate').textContent = money(mealRate.toFixed(2));
-      document.getElementById('mFund').textContent = money(fund);
+      setMetric('mTotalCollection', money(totalDeposit));
+      setMetric('mTotalExpense', money(totalExpense));
+      setMetric('mTotalMeals', totalMeals);
+      setMetric('mMealRate', money(mealRate.toFixed(2)));
+      setMetric('mFund', money(fund));
       const statusEl = document.getElementById('mStatus');
       statusEl.textContent = fund >= 0 ? '✅ Positive' : '⚠️ Negative';
       statusEl.style.color = fund >= 0 ? 'var(--good)' : 'var(--bad)';
@@ -852,10 +970,12 @@ function renderDashboard(expensesArg){
         const meals = mCounts.total;
         const cost = meals * mealRate;
         const bal = Number(m.deposit||0) - cost;
-        if(m.userId === currentUser.uid) myBalance = bal;
+        const isSelf = m.userId === currentUser.uid;
+        if(isSelf) myBalance = bal;
         const tr = document.createElement('tr');
+        if(isSelf) tr.style.background = 'var(--cream)';
         tr.innerHTML = `
-          <td>${esc(m.name)}</td>
+          <td>${esc(m.name)} ${isSelf ? '<span class="pill you">You</span>' : ''}</td>
           <td class="mono">${money(m.deposit)}</td>
           <td class="mono">${mCounts.lunch}</td>
           <td class="mono">${mCounts.dinner}</td>
@@ -867,7 +987,7 @@ function renderDashboard(expensesArg){
         `;
         tbody.appendChild(tr);
       });
-      document.getElementById('mMyBalance').textContent = money(myBalance.toFixed(2));
+      setMetric('mMyBalance', money(myBalance.toFixed(2)));
     });
   };
   if(expensesArg){ run(expensesArg); }
