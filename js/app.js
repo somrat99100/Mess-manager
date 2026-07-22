@@ -31,6 +31,11 @@ let messMealOffRequests = []; // array of mealOffRequests docs for this mess (wi
 let messGuestRequests = [];   // array of guestRequests docs for this mess (with id), all statuses
 let unsubscribers = [];
 
+/* Cached, live-updated data — avoids re-fetching from the network on every render so the
+   dashboard, scoreboard, and reports all compute instantly and stay in sync for every viewer. */
+let allMealsCache = [];   // every meals/{messId_date} doc for this mess, kept live via one listener
+let cachedExpenses = [];  // every expense for this mess, kept live via one listener
+
 /* ---------- utils ---------- */
 function toast(msg, type){
   const el = document.createElement('div');
@@ -226,6 +231,7 @@ function attachMessListeners(){
     document.getElementById('setLunchDeadline').value = currentMessDoc.lunchDeadline || '09:00';
     document.getElementById('setDinnerDeadline').value = currentMessDoc.dinnerDeadline || '16:00';
     renderMealDeadlineNote();
+    renderNoticeScoreboard();
   }, e => toast('Could not load mess details: ' + e.message, 'err'));
   unsubscribers.push(messSub);
 
@@ -235,6 +241,8 @@ function attachMessListeners(){
     renderDepositSelect();
     loadMealsForDate(document.getElementById('mealDatePicker').value || todayStr());
     renderDashboard();
+    renderNoticeScoreboard();
+    generateMonthlyReport();
   }, e => toast('Could not load members: ' + e.message, 'err'));
   unsubscribers.push(membersSub);
 
@@ -242,12 +250,23 @@ function attachMessListeners(){
   // Firestore index, and until that index exists the whole listener silently fails. Sorting in the
   // browser instead means expenses always show up right away, index or no index.
   const expSub = db.collection('expenses').where('messId','==', currentMessId).onSnapshot(snap => {
-    const expenses = snap.docs.map(d => ({id:d.id, ...d.data({serverTimestamps: 'estimate'})}))
+    cachedExpenses = snap.docs.map(d => ({id:d.id, ...d.data({serverTimestamps: 'estimate'})}))
       .sort((a,b) => (b.createdAt ? b.createdAt.toMillis() : 0) - (a.createdAt ? a.createdAt.toMillis() : 0));
-    renderExpenseTable(expenses);
-    renderDashboard(expenses);
+    renderExpenseTable(cachedExpenses);
+    renderDashboard();
+    generateMonthlyReport();
   }, e => toast('Could not load expenses: ' + e.message, 'err'));
   unsubscribers.push(expSub);
+
+  // Every meal doc for this mess, kept live in one place — the dashboard, scoreboard, and monthly
+  // report all read from this cache instead of each doing their own network round trip.
+  const allMealsSub = db.collection('meals').where('messId','==', currentMessId).onSnapshot(snap => {
+    allMealsCache = snap.docs.map(d => ({id: d.id, ...d.data()}));
+    renderDashboard();
+    renderNoticeScoreboard();
+    generateMonthlyReport();
+  }, e => toast('Could not load meal records: ' + e.message, 'err'));
+  unsubscribers.push(allMealsSub);
 
   const reqSub = db.collection('mealOffRequests').where('messId','==', currentMessId).onSnapshot(snap => {
     messMealOffRequests = snap.docs.map(d => ({id:d.id, ...d.data({serverTimestamps: 'estimate'})}));
@@ -280,6 +299,20 @@ function attachMessListeners(){
   }
   document.getElementById('mealDatePicker').addEventListener('change', e => loadMealsForDate(e.target.value));
   loadMealsForDate(document.getElementById('mealDatePicker').value);
+
+  const monthPicker = document.getElementById('reportMonthPicker');
+  if(monthPicker){
+    if(!monthPicker.value) monthPicker.value = todayStr().slice(0,7);
+    monthPicker.addEventListener('change', () => generateMonthlyReport());
+  }
+  generateMonthlyReport();
+  renderNoticeScoreboard();
+
+  // The lunch → dinner switchover on the scoreboard is time-based, not event-based —
+  // tick it every 30s so it flips the moment the clock crosses the deadline.
+  if(!window._scoreboardTicker){
+    window._scoreboardTicker = setInterval(renderNoticeScoreboard, 30000);
+  }
 }
 
 /* ============================================================
@@ -377,10 +410,10 @@ function renderDaySummary(dateStr){
   dateLabelEl.textContent = formatDateLabel(dateStr) + (dateStr === todayStr() ? ' · today' : '');
   let lunch = 0, dinner = 0, guest = 0, offCount = 0;
   messMembers.forEach(m => {
-    const rec = currentMealsCache[m.userId] || {lunch:true, dinner:true, guest:0};
+    const rec = currentMealsCache[m.userId] || {lunch:true, dinner:true, guestLunch:0, guestDinner:0};
     if(rec.lunch) lunch++; else offCount++;
     if(rec.dinner) dinner++; else offCount++;
-    guest += Number(rec.guest || 0);
+    guest += Number(rec.guestLunch || 0) + Number(rec.guestDinner || 0);
   });
   const total = lunch + dinner + guest;
   document.getElementById('dayTotalMeals').innerHTML = total + '<span class="unit">meals</span>';
@@ -413,7 +446,7 @@ function toggleDayOff(){
     // switching the whole day off: everyone's lunch & dinner go OFF (guest counts kept as-is)
     updatedMembers = {};
     messMembers.forEach(m => {
-      const cur = currentMealsCache[m.userId] || {lunch:true, dinner:true, guest:0};
+      const cur = currentMealsCache[m.userId] || {lunch:true, dinner:true, guestLunch:0, guestDinner:0};
       updatedMembers[m.userId] = { ...cur, lunch:false, dinner:false };
     });
   }
@@ -451,8 +484,9 @@ function renderMealCards(dateStr){
   });
 
   ordered.forEach(mem => {
-    const rec = currentMealsCache[mem.userId] || {lunch:true, dinner:true, guest:0}; // default ON, 0 guests
-    const guestCount = rec.guest || 0;
+    const rec = currentMealsCache[mem.userId] || {lunch:true, dinner:true, guestLunch:0, guestDinner:0}; // default ON, 0 guests
+    const gL = Number(rec.guestLunch || 0);
+    const gD = Number(rec.guestDinner || 0);
     const isSelf = mem.userId === currentUser.uid;
 
     // Manager: can edit any current-or-future day, never a past one. Member: only their own row,
@@ -484,18 +518,24 @@ function renderMealCards(dateStr){
         ? `<button class="btn-request-off" onclick="requestMealOff('${dateStr}','dinner')">Request off</button>`
         : `<button class="meal-toggle ${rec.dinner ? 'on':''}" ${canEditDinner?'':'disabled'} onclick="toggleMeal('${dateStr}','${mem.userId}','dinner')"><span class="knob"></span></button>`;
 
-    // Guest meals — manager taps a member's chip to set the exact count directly; a member taps
-    // their own chip to request guest meals be added (goes to the manager for approval).
-    let guestCell;
-    if(guestPending){
-      guestCell = `<span class="request-pending-badge">+${guestPending.count} pending</span>`;
-    } else if(isManager && !currentDayOff && !isPastDay){
-      guestCell = `<button class="guest-chip ${guestCount===0?'zero':''}" onclick="openGuestSetModal('${dateStr}','${mem.userId}','${esc(mem.name)}',${guestCount})">👤 ${guestCount}</button>`;
-    } else if(!isManager && isSelf && !currentDayOff && !isPastDay){
-      guestCell = `<button class="guest-chip ${guestCount===0?'zero':''}" onclick="openGuestRequestModal('${dateStr}')">👤 ${guestCount} <span class="g-plus">+ add</span></button>`;
-    } else {
-      guestCell = `<span class="guest-chip zero" style="cursor:default;">👤 ${guestCount}</span>`;
+    // Guest meals — manager taps a chip to set that meal's exact count directly; a member taps
+    // their own chip to request guest meals be added for lunch or dinner (goes to the manager for approval).
+    const guestLunchPending = pendingGuestForDate.find(r => r.memberId === mem.userId && r.mealType === 'lunch');
+    const guestDinnerPending = pendingGuestForDate.find(r => r.memberId === mem.userId && r.mealType === 'dinner');
+    const canTouchGuest = !currentDayOff && !isPastDay;
+
+    function guestChipFor(mealType, pending, count){
+      const icon = mealType === 'lunch' ? '☀️' : '🌙';
+      if(pending) return `<span class="request-pending-badge mini">+${pending.count} pending</span>`;
+      if(isManager && canTouchGuest){
+        return `<button class="guest-chip mini ${count===0?'zero':''}" onclick="openGuestSetModal('${dateStr}','${mem.userId}','${esc(mem.name)}','${mealType}',${count})">${icon} ${count}</button>`;
+      }
+      if(!isManager && isSelf && canTouchGuest){
+        return `<button class="guest-chip mini ${count===0?'zero':''}" onclick="openGuestRequestModal('${dateStr}','${mealType}')">${icon} ${count} <span class="g-plus">+</span></button>`;
+      }
+      return `<span class="guest-chip mini zero" style="cursor:default;">${icon} ${count}</span>`;
     }
+    const guestCell = `<div class="guest-dual">${guestChipFor('lunch', guestLunchPending, gL)}${guestChipFor('dinner', guestDinnerPending, gD)}</div>`;
 
     const row = document.createElement('div');
     row.className = 'meal-card-row' + (isSelf ? ' mc-self' : '');
@@ -553,19 +593,21 @@ function rejectMealOffRequest(reqId){
 
 /* ---------- guest-meal requests: member asks for guest meals to be added, manager approves/declines ---------- */
 let guestRequestDate = null; // set when the "request guest meals" modal opens
-function openGuestRequestModal(dateStr){
+function openGuestRequestModal(dateStr, mealType){
   guestRequestDate = dateStr;
   document.getElementById('guestRequestModalSub').textContent = `For ${formatDateLabel(dateStr)}. Your manager will review and approve this.`;
   document.getElementById('guestRequestCount').value = 1;
+  if(mealType) document.getElementById('guestRequestMealType').value = mealType;
   openModal('guestRequestModal');
 }
 function submitGuestRequest(){
   const count = Number(document.getElementById('guestRequestCount').value);
+  const mealType = document.getElementById('guestRequestMealType').value;
   if(!guestRequestDate || !count || count <= 0){ toast('Enter how many guest meals you need', 'err'); return; }
-  const already = messGuestRequests.find(r => r.date === guestRequestDate && r.memberId === currentUser.uid && r.status === 'pending');
-  if(already){ toast('You already have a pending guest-meal request for this day.', 'err'); closeModal('guestRequestModal'); return; }
+  const already = messGuestRequests.find(r => r.date === guestRequestDate && r.mealType === mealType && r.memberId === currentUser.uid && r.status === 'pending');
+  if(already){ toast('You already have a pending request for this meal.', 'err'); closeModal('guestRequestModal'); return; }
   db.collection('guestRequests').add({
-    messId: currentMessId, date: guestRequestDate, count,
+    messId: currentMessId, date: guestRequestDate, mealType, count,
     memberId: currentUser.uid, memberName: currentUserDoc.name,
     status: 'pending',
     requestedAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -579,15 +621,16 @@ function approveGuestRequest(reqId){
   const req = messGuestRequests.find(r => r.id === reqId);
   if(!req) return;
   const mealId = currentMessId + '_' + req.date;
+  const field = req.mealType === 'dinner' ? 'guestDinner' : 'guestLunch';
   db.collection('meals').doc(mealId).set({
     messId: currentMessId, date: req.date,
-    members: { [req.memberId]: { guest: firebase.firestore.FieldValue.increment(req.count) } },
+    members: { [req.memberId]: { [field]: firebase.firestore.FieldValue.increment(req.count) } },
     updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
     updatedBy: currentUser.uid
   }, {merge: true}).then(()=> db.collection('guestRequests').doc(reqId).update({
     status: 'approved', respondedAt: firebase.firestore.FieldValue.serverTimestamp(), respondedBy: currentUser.uid
   })).then(()=>{
-    toast(`Added ${req.count} guest meal(s) for ${req.memberName}`, 'ok');
+    toast(`Added ${req.count} ${req.mealType} guest meal(s) for ${req.memberName}`, 'ok');
     renderDashboard();
   }).catch(e => toast(e.message, 'err'));
 }
@@ -601,11 +644,13 @@ function rejectGuestRequest(reqId){
 }
 
 /* ---------- manager: set a member's exact guest-meal count directly, any day that isn't past ---------- */
-let guestSetContext = null; // {dateStr, memberId}
-function openGuestSetModal(dateStr, memberId, memberName, currentCount){
-  guestSetContext = {dateStr, memberId};
+let guestSetContext = null; // {dateStr, memberId, mealType}
+function openGuestSetModal(dateStr, memberId, memberName, mealType, currentCount){
+  guestSetContext = {dateStr, memberId, mealType};
+  const label = mealType === 'dinner' ? '🌙 Dinner' : '☀️ Lunch';
   document.getElementById('guestSetModalTitle').textContent = `Guest meals — ${memberName}`;
-  document.getElementById('guestSetModalSub').textContent = `For ${formatDateLabel(dateStr)}.`;
+  document.getElementById('guestSetModalSub').textContent = `${label} · ${formatDateLabel(dateStr)}`;
+  document.getElementById('guestSetCountLabel').textContent = label + ' guest meal count';
   document.getElementById('guestSetCount').value = currentCount;
   openModal('guestSetModal');
 }
@@ -613,7 +658,7 @@ function submitGuestSet(){
   if(!guestSetContext) return;
   const count = Number(document.getElementById('guestSetCount').value);
   if(isNaN(count) || count < 0){ toast('Enter a valid guest count', 'err'); return; }
-  setGuestMeals(guestSetContext.dateStr, guestSetContext.memberId, count);
+  setGuestMeals(guestSetContext.dateStr, guestSetContext.memberId, guestSetContext.mealType, count);
   closeModal('guestSetModal');
 }
 
@@ -645,7 +690,7 @@ function renderRequestsPanel(){
     return `
       <div class="request-row">
         <div class="request-info">
-          <span class="request-tag guest">Guest</span><strong>${esc(r.memberName)}</strong> wants +${r.count} guest meal(s) on ${esc(formatDateLabel(r.date))}
+          <span class="request-tag guest">Guest</span><strong>${esc(r.memberName)}</strong> wants +${r.count} ${esc(r.mealType||'')} guest meal(s) on ${esc(formatDateLabel(r.date))}
           <span class="r-meta">Requested ${when}</span>
         </div>
         <div class="request-actions">
@@ -669,7 +714,7 @@ function toggleMeal(dateStr, memberId, type){
     return;
   }
   const mealId = currentMessId + '_' + dateStr;
-  const current = currentMealsCache[memberId] || {lunch:true, dinner:true, guest:0};
+  const current = currentMealsCache[memberId] || {lunch:true, dinner:true, guestLunch:0, guestDinner:0};
   const newVal = !current[type];
   db.collection('meals').doc(mealId).set({
     messId: currentMessId, date: dateStr,
@@ -679,16 +724,17 @@ function toggleMeal(dateStr, memberId, type){
   }, {merge: true}).then(()=> renderDashboard()).catch(e => toast(e.message, 'err'));
 }
 
-// Guest meals: extra meals eaten by a member's guest on a given day.
+// Guest meals: extra meals eaten by a member's guest on a given day, for a specific meal.
 // Manager sets the exact count directly (via the guest-set modal); members request additions instead.
-function setGuestMeals(dateStr, memberId, newCount){
+function setGuestMeals(dateStr, memberId, mealType, newCount){
   if(myRole !== 'manager'){ toast('Only the manager can set guest meals directly — send a request instead.', 'err'); return; }
   if(dateStr < todayStr()){ toast('Past days can\u2019t be edited.', 'err'); return; }
   if(newCount < 0) newCount = 0;
+  const field = mealType === 'dinner' ? 'guestDinner' : 'guestLunch';
   const mealId = currentMessId + '_' + dateStr;
   db.collection('meals').doc(mealId).set({
     messId: currentMessId, date: dateStr,
-    members: { [memberId]: { guest: newCount } },
+    members: { [memberId]: { [field]: newCount } },
     updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
     updatedBy: currentUser.uid
   }, {merge: true}).then(()=>{
@@ -802,19 +848,6 @@ function addFund(){
     toast('Fund added — dashboard updated', 'ok');
   }).catch(e => toast(e.message, 'err'));
 }
-// Corrects a member's deposit to an exact figure (e.g. fixing a typo), overwriting rather than adding.
-function setExactDeposit(){
-  const docId = document.getElementById('depositMemberSelect').value;
-  const amount = Number(document.getElementById('depositAmount').value);
-  if(!docId || isNaN(amount) || amount < 0){ toast('Choose a member and enter a valid amount', 'err'); return; }
-  db.collection('messMembers').doc(docId).update({deposit: amount})
-    .then(()=>{
-      document.getElementById('depositAmount').value = '';
-      toast('Deposit corrected', 'ok');
-    })
-    .catch(e => toast(e.message, 'err'));
-}
-
 /* ============================================================
    SETTINGS
 ============================================================ */
@@ -920,76 +953,187 @@ function postNotice(){
 }
 
 /* ============================================================
+   LIVE SCOREBOARD — today's total Lunch, then today's total Dinner
+   once the lunch cutoff has passed. Reads straight from allMealsCache,
+   so it updates the instant anyone's meal changes.
+============================================================ */
+function currentMealPhase(){
+  if(!currentMessDoc) return 'lunch';
+  const [h,m] = (currentMessDoc.lunchDeadline || '09:00').split(':').map(Number);
+  const deadline = new Date(); deadline.setHours(h, m, 0, 0);
+  return new Date() < deadline ? 'lunch' : 'dinner';
+}
+function renderNoticeScoreboard(){
+  const countEl = document.getElementById('scoreboardCount');
+  if(!countEl || !currentMessId) return;
+  const phase = currentMealPhase();
+  const today = todayStr();
+  const todayDoc = allMealsCache.find(d => d.date === today);
+  const members = (todayDoc && todayDoc.members) || {};
+  let count = 0;
+  messMembers.forEach(m => {
+    const rec = members[m.userId] || {lunch:true, dinner:true, guestLunch:0, guestDinner:0};
+    if(phase === 'lunch') count += (rec.lunch ? 1 : 0) + Number(rec.guestLunch || 0);
+    else count += (rec.dinner ? 1 : 0) + Number(rec.guestDinner || 0);
+  });
+  countEl.textContent = count;
+  document.getElementById('scoreboardIcon').textContent = phase === 'lunch' ? '☀️' : '🌙';
+  document.getElementById('scoreboardLabel').textContent = phase === 'lunch' ? "Today's total Lunch" : "Today's total Dinner";
+}
+
+/* ============================================================
    DASHBOARD CALCULATIONS
 ============================================================ */
-let dashboardRenderToken = 0; // guards against a slow/stale async response overwriting a newer render
-function renderDashboard(expensesArg){
-  if(!currentMessId) return;
-  const myToken = ++dashboardRenderToken;
-  const run = (expenses) => {
-    const totalExpense = expenses.reduce((s,e)=> s + Number(e.amount||0), 0);
-    // total meals: sum lunch+dinner ON counts across ALL days recorded for this mess
-    db.collection('meals').where('messId','==', currentMessId).get().then(snap => {
-      if(myToken !== dashboardRenderToken) return; // a newer render has already started — drop this stale one
-      let totalMeals = 0;
-      const perMember = {}; // userId -> {lunch, dinner, guest, total}
-      messMembers.forEach(m => perMember[m.userId] = {lunch:0, dinner:0, guest:0, total:0});
-      snap.forEach(doc => {
-        const members = doc.data().members || {};
-        Object.keys(members).forEach(uid => {
-          if(!perMember[uid]) perMember[uid] = {lunch:0, dinner:0, guest:0, total:0};
-          const rec = members[uid];
-          const guest = Number(rec.guest||0);
-          let c = 0;
-          if(rec.lunch){ c++; perMember[uid].lunch++; }
-          if(rec.dinner){ c++; perMember[uid].dinner++; }
-          c += guest;
-          perMember[uid].guest += guest;
-          totalMeals += c;
-          perMember[uid].total += c;
-        });
-      });
-      const totalDeposit = messMembers.reduce((s,m)=> s + Number(m.deposit||0), 0);
-      const mealRate = totalMeals > 0 ? totalExpense / totalMeals : 0;
-      const fund = totalDeposit - totalExpense;
-
-      setMetric('mTotalCollection', money(totalDeposit));
-      setMetric('mTotalExpense', money(totalExpense));
-      setMetric('mTotalMeals', totalMeals);
-      setMetric('mMealRate', money(mealRate.toFixed(2)));
-      setMetric('mFund', money(fund));
-      const statusEl = document.getElementById('mStatus');
-      statusEl.textContent = fund >= 0 ? '✅ Positive' : '⚠️ Negative';
-      statusEl.style.color = fund >= 0 ? 'var(--good)' : 'var(--bad)';
-
-      const tbody = document.querySelector('#dashboardMemberTable tbody');
-      tbody.innerHTML = '';
-      let myBalance = 0;
-      messMembers.forEach(m => {
-        const mCounts = perMember[m.userId] || {lunch:0, dinner:0, guest:0, total:0};
-        const meals = mCounts.total;
-        const cost = meals * mealRate;
-        const bal = Number(m.deposit||0) - cost;
-        const isSelf = m.userId === currentUser.uid;
-        if(isSelf) myBalance = bal;
-        const tr = document.createElement('tr');
-        if(isSelf) tr.style.background = 'var(--cream)';
-        tr.innerHTML = `
-          <td>${esc(m.name)} ${isSelf ? '<span class="pill you">You</span>' : ''}</td>
-          <td class="mono">${money(m.deposit)}</td>
-          <td class="mono">${mCounts.lunch}</td>
-          <td class="mono">${mCounts.dinner}</td>
-          <td class="mono">${mCounts.guest}</td>
-          <td class="mono">${meals}</td>
-          <td class="mono">${money(cost.toFixed(2))}</td>
-          <td class="mono">${money(bal.toFixed(2))}</td>
-          <td><span class="pill ${bal>=0?'on':'off'}">${bal>=0 ? 'No due' : 'Due'}</span></td>
-        `;
-        tbody.appendChild(tr);
-      });
-      setMetric('mMyBalance', money(myBalance.toFixed(2)));
+/* Tallies lunch/dinner (each including that meal's guest count) for every member across a
+   given set of meal docs. Shared by the live dashboard and the monthly report. */
+function tallyMeals(mealDocs){
+  const perMember = {}; // userId -> {lunch, dinner, total}
+  messMembers.forEach(m => perMember[m.userId] = {lunch:0, dinner:0, total:0});
+  let totalMeals = 0;
+  mealDocs.forEach(doc => {
+    const members = doc.members || {};
+    Object.keys(members).forEach(uid => {
+      if(!perMember[uid]) perMember[uid] = {lunch:0, dinner:0, total:0};
+      const rec = members[uid];
+      const lunch = (rec.lunch ? 1 : 0) + Number(rec.guestLunch || 0);
+      const dinner = (rec.dinner ? 1 : 0) + Number(rec.guestDinner || 0);
+      perMember[uid].lunch += lunch;
+      perMember[uid].dinner += dinner;
+      perMember[uid].total += lunch + dinner;
+      totalMeals += lunch + dinner;
     });
-  };
-  if(expensesArg){ run(expensesArg); }
-  else db.collection('expenses').where('messId','==', currentMessId).get().then(snap => run(snap.docs.map(d=>({id:d.id,...d.data()}))));
+  });
+  return {perMember, totalMeals};
+}
+
+// Computes and paints the live dashboard synchronously from the already-live caches
+// (allMealsCache, cachedExpenses, messMembers) — no network call happens on render,
+// so the numbers update the instant any listener fires.
+function renderDashboard(){
+  if(!currentMessId) return;
+  const totalExpense = cachedExpenses.reduce((s,e)=> s + Number(e.amount||0), 0);
+  const {perMember, totalMeals} = tallyMeals(allMealsCache);
+  const totalDeposit = messMembers.reduce((s,m)=> s + Number(m.deposit||0), 0);
+  const mealRate = totalMeals > 0 ? totalExpense / totalMeals : 0;
+  const fund = totalDeposit - totalExpense;
+
+  setMetric('mTotalCollection', money(totalDeposit));
+  setMetric('mTotalExpense', money(totalExpense));
+  setMetric('mTotalMeals', totalMeals);
+  setMetric('mMealRate', money(mealRate.toFixed(2)));
+  setMetric('mFund', money(fund));
+  const statusEl = document.getElementById('mStatus');
+  if(statusEl){
+    statusEl.textContent = fund >= 0 ? '✅ Positive' : '⚠️ Negative';
+    statusEl.style.color = fund >= 0 ? 'var(--good)' : 'var(--bad)';
+  }
+
+  let myBalance = 0;
+  const rows = messMembers.map(m => {
+    const mCounts = perMember[m.userId] || {lunch:0, dinner:0, total:0};
+    const cost = mCounts.total * mealRate;
+    const bal = Number(m.deposit||0) - cost;
+    if(m.userId === currentUser.uid) myBalance = bal;
+    return {m, mCounts, cost, bal};
+  });
+  renderBalanceGlanceTable(rows);
+  setMetric('mMyBalance', money(myBalance.toFixed(2)));
+}
+
+function renderBalanceGlanceTable(rows){
+  const tbody = document.querySelector('#dashboardMemberTable tbody');
+  if(!tbody) return;
+  tbody.innerHTML = '';
+  if(!rows.length){
+    tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state">No members yet.</div></td></tr>`;
+    return;
+  }
+  rows.forEach(({m, mCounts, cost, bal}) => {
+    const isSelf = m.userId === currentUser.uid;
+    const tr = document.createElement('tr');
+    if(isSelf) tr.style.background = 'var(--cream)';
+    tr.innerHTML = `
+      <td>${esc(m.name)} ${isSelf ? '<span class="pill you">You</span>' : ''}</td>
+      <td class="mono">${money(m.deposit)}</td>
+      <td class="mono">${mCounts.lunch}</td>
+      <td class="mono">${mCounts.dinner}</td>
+      <td class="mono">${mCounts.total}</td>
+      <td class="mono">${money(cost.toFixed(2))}</td>
+      <td class="mono">${money(bal.toFixed(2))}</td>
+      <td><span class="pill ${bal>=0?'on':'off'}">${bal>=0 ? 'No due' : 'Due'}</span></td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+/* ============================================================
+   MONTHLY REPORT — mirrors the dashboard math but scoped to one
+   calendar month, with a Download as PDF / JPG option.
+============================================================ */
+function generateMonthlyReport(){
+  const table = document.getElementById('monthlyReportTable');
+  if(!table || !currentMessId) return;
+  const picker = document.getElementById('reportMonthPicker');
+  const monthStr = (picker && picker.value) || todayStr().slice(0,7); // 'YYYY-MM'
+  const titleEl = document.getElementById('reportBannerTitle');
+  if(titleEl){
+    const label = new Date(monthStr + '-01T00:00:00').toLocaleDateString('en-GB', {month:'long', year:'numeric'});
+    titleEl.textContent = 'Monthly Report — ' + label;
+  }
+
+  const monthMeals = allMealsCache.filter(d => (d.date||'').startsWith(monthStr));
+  const monthExpense = cachedExpenses.filter(e => (e.date||'').startsWith(monthStr)).reduce((s,e)=> s + Number(e.amount||0), 0);
+  const {perMember, totalMeals} = tallyMeals(monthMeals);
+  const mealRate = totalMeals > 0 ? monthExpense / totalMeals : 0;
+
+  const tbody = table.querySelector('tbody');
+  tbody.innerHTML = '';
+  if(!messMembers.length){
+    tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state">No members yet.</div></td></tr>`;
+    return;
+  }
+  messMembers.forEach(m => {
+    const mCounts = perMember[m.userId] || {lunch:0, dinner:0, total:0};
+    const cost = mCounts.total * mealRate;
+    const bal = Number(m.deposit||0) - cost;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${esc(m.name)}</td>
+      <td class="mono">${money(m.deposit)}</td>
+      <td class="mono">${mCounts.lunch}</td>
+      <td class="mono">${mCounts.dinner}</td>
+      <td class="mono">${mCounts.total}</td>
+      <td class="mono">${money(cost.toFixed(2))}</td>
+      <td class="mono ${bal>=0?'pos':'neg'}">${bal>=0 ? money(bal.toFixed(2)) : '-' + money(Math.abs(bal).toFixed(2))}</td>
+      <td><span class="pill ${bal>=0?'on':'off'}">${bal>=0 ? '✅ No Due' : '❌ Due: ' + money(Math.abs(bal).toFixed(2))}</span></td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function downloadReportAsJPG(){
+  const el = document.getElementById('monthlyReportCapture');
+  if(!el || !window.html2canvas){ toast('Report is still loading — try again in a moment.', 'err'); return; }
+  toast('Preparing image…', 'ok');
+  html2canvas(el, {backgroundColor:'#ffffff', scale:2}).then(canvas => {
+    const link = document.createElement('a');
+    link.download = 'mess-monthly-report.jpg';
+    link.href = canvas.toDataURL('image/jpeg', 0.95);
+    link.click();
+  }).catch(()=> toast('Could not generate the image.', 'err'));
+}
+function downloadReportAsPDF(){
+  const el = document.getElementById('monthlyReportCapture');
+  if(!el || !window.html2canvas || !window.jspdf){ toast('Report is still loading — try again in a moment.', 'err'); return; }
+  toast('Preparing PDF…', 'ok');
+  html2canvas(el, {backgroundColor:'#ffffff', scale:2}).then(canvas => {
+    const { jsPDF } = window.jspdf;
+    const imgData = canvas.toDataURL('image/png');
+    const pxToMm = 0.264583;
+    const wMm = canvas.width * pxToMm;
+    const hMm = canvas.height * pxToMm;
+    const pdf = new jsPDF({orientation: wMm > hMm ? 'landscape' : 'portrait', unit:'mm', format:[wMm, hMm]});
+    pdf.addImage(imgData, 'PNG', 0, 0, wMm, hMm);
+    pdf.save('mess-monthly-report.pdf');
+  }).catch(()=> toast('Could not generate the PDF.', 'err'));
 }
