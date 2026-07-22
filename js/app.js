@@ -230,8 +230,13 @@ function attachMessListeners(){
     document.getElementById('setPhone').value = currentMessDoc.phone || '';
     document.getElementById('setLunchDeadline').value = currentMessDoc.lunchDeadline || '09:00';
     document.getElementById('setDinnerDeadline').value = currentMessDoc.dinnerDeadline || '16:00';
+    document.getElementById('setCycleStart').value = currentMessDoc.cycleStart || '';
+    document.getElementById('setCycleEnd').value = currentMessDoc.cycleEnd || '';
+    const resetLabel = document.getElementById('resetMessNameLabel');
+    if(resetLabel) resetLabel.textContent = currentMessDoc.name || 'this mess';
     renderMealDeadlineNote();
     renderNoticeScoreboard();
+    renderCycleMetric();
   }, e => toast('Could not load mess details: ' + e.message, 'err'));
   unsubscribers.push(messSub);
 
@@ -243,6 +248,7 @@ function attachMessListeners(){
     renderDashboard();
     renderNoticeScoreboard();
     generateMonthlyReport();
+    renderMealHistory();
   }, e => toast('Could not load members: ' + e.message, 'err'));
   unsubscribers.push(membersSub);
 
@@ -265,6 +271,7 @@ function attachMessListeners(){
     renderDashboard();
     renderNoticeScoreboard();
     generateMonthlyReport();
+    renderMealHistory();
   }, e => toast('Could not load meal records: ' + e.message, 'err'));
   unsubscribers.push(allMealsSub);
 
@@ -306,6 +313,7 @@ function attachMessListeners(){
     monthPicker.addEventListener('change', () => generateMonthlyReport());
   }
   generateMonthlyReport();
+  renderMealHistory();
   renderNoticeScoreboard();
 
   // The lunch → dinner switchover on the scoreboard is time-based, not event-based —
@@ -812,12 +820,27 @@ function promoteMember(docId, name, currentRole){
   const newRole = currentRole === 'manager' ? 'member' : 'manager';
   document.getElementById('promoteModalTitle').textContent = newRole === 'manager' ? 'Make manager' : 'Remove manager role';
   document.getElementById('promoteModalBody').textContent = newRole === 'manager'
-    ? `${name} will gain full manager access — they can edit meals, expenses, and settings for everyone.`
+    ? `There's only ever one manager at a time. ${name} will become the mess's sole manager, gaining full access to edit meals, expenses, and settings for everyone — and the current manager (if different) will immediately lose manager access.`
     : `${name} will become a regular member and lose manager access.`;
   document.getElementById('promoteConfirmBtn').onclick = () => {
-    db.collection('messMembers').doc(docId).update({role: newRole})
-      .then(()=>{ closeModal('promoteModal'); toast('Role updated', 'ok'); })
-      .catch(e => toast(e.message, 'err'));
+    if(newRole === 'manager'){
+      // Only one manager at a time: promoting this member demotes whoever currently holds the role,
+      // with no lingering access for them once this commits.
+      const batch = db.batch();
+      messMembers.forEach(m => {
+        if(m.role === 'manager' && m.id !== docId) batch.update(db.collection('messMembers').doc(m.id), {role: 'member'});
+      });
+      batch.update(db.collection('messMembers').doc(docId), {role: 'manager'});
+      const target = messMembers.find(m => m.id === docId);
+      if(target) batch.update(db.collection('mess').doc(currentMessId), {managerIds: [target.userId]});
+      batch.commit()
+        .then(()=>{ closeModal('promoteModal'); toast(name + ' is now the manager', 'ok'); })
+        .catch(e => toast(e.message, 'err'));
+    } else {
+      db.collection('messMembers').doc(docId).update({role: newRole})
+        .then(()=>{ closeModal('promoteModal'); toast('Role updated', 'ok'); })
+        .catch(e => toast(e.message, 'err'));
+    }
   };
   openModal('promoteModal');
 }
@@ -857,8 +880,58 @@ function saveMessSettings(){
     location: document.getElementById('setLocation').value.trim(),
     phone: document.getElementById('setPhone').value.trim(),
     lunchDeadline: document.getElementById('setLunchDeadline').value || '09:00',
-    dinnerDeadline: document.getElementById('setDinnerDeadline').value || '16:00'
+    dinnerDeadline: document.getElementById('setDinnerDeadline').value || '16:00',
+    cycleStart: document.getElementById('setCycleStart').value || '',
+    cycleEnd: document.getElementById('setCycleEnd').value || ''
   }).then(()=> toast('Mess settings saved', 'ok')).catch(e => toast(e.message,'err'));
+}
+
+/* ============================================================
+   DANGER ZONE — a freshly-assigned manager can wipe the slate clean:
+   every meal record, expense, notice, and pending request gets deleted,
+   and every member's deposit resets to ৳0. Members and the invite code
+   are left untouched.
+============================================================ */
+function openResetDataModal(){
+  if(myRole !== 'manager') return;
+  document.getElementById('resetConfirmInput').value = '';
+  openModal('resetDataModal');
+}
+function confirmResetAllData(){
+  if(myRole !== 'manager' || !currentMessDoc) return;
+  const typed = document.getElementById('resetConfirmInput').value.trim();
+  if(typed !== currentMessDoc.name){
+    toast('Mess name doesn\u2019t match — type it exactly to confirm.', 'err');
+    return;
+  }
+  toast('Resetting mess data…', 'ok');
+  const collections = ['meals', 'expenses', 'notices', 'mealOffRequests', 'guestRequests'];
+  Promise.all(collections.map(col => db.collection(col).where('messId','==', currentMessId).get()))
+    .then(snaps => {
+      const allRefs = snaps.flatMap(snap => snap.docs.map(d => d.ref));
+      // Firestore batches cap at 500 writes — chunk in case a mess has a long history.
+      const chunks = [];
+      for(let i = 0; i < allRefs.length; i += 450) chunks.push(allRefs.slice(i, i + 450));
+      return chunks.reduce((p, chunk) => p.then(() => {
+        const batch = db.batch();
+        chunk.forEach(ref => batch.delete(ref));
+        return batch.commit();
+      }), Promise.resolve());
+    })
+    .then(() => {
+      const chunks = [];
+      for(let i = 0; i < messMembers.length; i += 450) chunks.push(messMembers.slice(i, i + 450));
+      return chunks.reduce((p, chunk) => p.then(() => {
+        const batch = db.batch();
+        chunk.forEach(m => batch.update(db.collection('messMembers').doc(m.id), {deposit: 0}));
+        return batch.commit();
+      }), Promise.resolve());
+    })
+    .then(() => {
+      closeModal('resetDataModal');
+      toast('Mess data reset — fresh start!', 'ok');
+    })
+    .catch(e => toast(e.message, 'err'));
 }
 
 /* ============================================================
@@ -1022,11 +1095,20 @@ function renderDashboard(){
   setMetric('mTotalMeals', totalMeals);
   setMetric('mMealRate', money(mealRate.toFixed(2)));
   setMetric('mFund', money(fund));
+  // Three-tier fund health: Negative (in deficit), Low (positive but thin — couldn't
+  // comfortably cover a few more days of meals for everyone), Healthy (solid buffer).
   const statusEl = document.getElementById('mStatus');
   if(statusEl){
-    statusEl.textContent = fund >= 0 ? '✅ Positive' : '⚠️ Negative';
-    statusEl.style.color = fund >= 0 ? 'var(--good)' : 'var(--bad)';
+    const activeMembers = messMembers.length || 1;
+    const lowBuffer = mealRate > 0 ? mealRate * activeMembers * 3 : 500; // ~3 more days of meals, all members
+    let statusText, statusColor;
+    if(fund < 0){ statusText = '🔴 Negative'; statusColor = 'var(--bad)'; }
+    else if(fund < lowBuffer){ statusText = '🟡 Low'; statusColor = 'var(--gold)'; }
+    else { statusText = '🟢 Healthy'; statusColor = 'var(--good)'; }
+    statusEl.textContent = statusText;
+    statusEl.style.color = statusColor;
   }
+  renderCycleMetric();
 
   let myBalance = 0;
   const rows = messMembers.map(m => {
@@ -1038,6 +1120,13 @@ function renderDashboard(){
   });
   renderBalanceGlanceTable(rows);
   setMetric('mMyBalance', money(myBalance.toFixed(2)));
+}
+
+function renderCycleMetric(){
+  const el = document.getElementById('mCycle');
+  if(!el || !currentMessDoc) return;
+  const s = currentMessDoc.cycleStart, e = currentMessDoc.cycleEnd;
+  el.textContent = (s || e) ? `${s ? formatDateLabel(s) : '—'} → ${e ? formatDateLabel(e) : '—'}` : 'Not set';
 }
 
 function renderBalanceGlanceTable(rows){
@@ -1109,6 +1198,49 @@ function generateMonthlyReport(){
     `;
     tbody.appendChild(tr);
   });
+}
+
+/* ============================================================
+   MEAL HISTORY — last 30 calendar days, newest first. Reads straight
+   from the live allMealsCache/messMembers caches, no extra network call.
+============================================================ */
+function renderMealHistory(){
+  const tbody = document.querySelector('#mealHistoryTable tbody');
+  if(!tbody || !currentMessId) return;
+  if(!messMembers.length){
+    tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state">No members yet.</div></td></tr>`;
+    document.getElementById('mealHistoryRunningTotal').textContent = '0';
+    return;
+  }
+  const today = new Date();
+  let runningTotal = 0;
+  const rowsHtml = [];
+  for(let i = 0; i < 30; i++){
+    const d = new Date(today); d.setDate(d.getDate() - i);
+    const dateStr = d.toISOString().slice(0,10);
+    const doc = allMealsCache.find(md => md.date === dateStr);
+    const members = (doc && doc.members) || {};
+    let lunch = 0, dinner = 0, guest = 0, off = 0;
+    messMembers.forEach(m => {
+      const rec = members[m.userId] || {lunch:true, dinner:true, guestLunch:0, guestDinner:0};
+      if(rec.lunch) lunch++; else off++;
+      if(rec.dinner) dinner++; else off++;
+      guest += Number(rec.guestLunch || 0) + Number(rec.guestDinner || 0);
+    });
+    const total = lunch + dinner + guest;
+    runningTotal += total;
+    rowsHtml.push(`
+      <tr>
+        <td class="mono">${formatDateLabel(dateStr)}${dateStr === todayStr() ? ' <span class="pill you">Today</span>' : ''}</td>
+        <td class="mono">${lunch}</td>
+        <td class="mono">${dinner}</td>
+        <td class="mono">${guest}</td>
+        <td class="mono">${off}</td>
+        <td class="mono" style="font-weight:700;">${total}</td>
+      </tr>`);
+  }
+  tbody.innerHTML = rowsHtml.join('');
+  document.getElementById('mealHistoryRunningTotal').textContent = runningTotal;
 }
 
 function downloadReportAsJPG(){
