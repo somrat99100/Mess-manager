@@ -29,7 +29,11 @@ let myRole = null;            // 'manager' | 'member'
 let messMembers = [];         // array of messMembers docs (with id)
 let messMealOffRequests = []; // array of mealOffRequests docs for this mess (with id), all statuses
 let messGuestRequests = [];   // array of guestRequests docs for this mess (with id), all statuses
+let messManagerRequests = []; // array of managerRequests docs for this mess (with id), all statuses
+let messJoinRequests = [];    // array of joinRequests docs for this mess (with id), all statuses
 let unsubscribers = [];
+let joinReqUnsub = null;              // live listener on this user's own joinRequests, while awaiting approval
+let notifiedDeclinedReqIds = new Set(); // join-request ids we've already toasted a decline for (avoid repeat toasts)
 
 /* Cached, live-updated data — avoids re-fetching from the network on every render so the
    dashboard, scoreboard, and reports all compute instantly and stay in sync for every viewer. */
@@ -116,6 +120,7 @@ function doLogin(){
 function doLogout(){
   unsubscribers.forEach(u => u());
   unsubscribers = [];
+  if(joinReqUnsub){ joinReqUnsub(); joinReqUnsub = null; }
   auth.signOut();
 }
 
@@ -144,17 +149,48 @@ function loadUserAndMess(){
   }).then(snap => {
     showApp();
     if(snap.empty){
-      document.getElementById('noMessState').classList.remove('hidden');
-      document.getElementById('mainAppState').classList.add('hidden');
+      watchMyJoinRequests();
     } else {
+      if(joinReqUnsub){ joinReqUnsub(); joinReqUnsub = null; }
       const md = snap.docs[0].data();
       currentMessId = md.messId;
       myRole = md.role;
       attachMessListeners();
       document.getElementById('noMessState').classList.add('hidden');
+      document.getElementById('joinPendingState').classList.add('hidden');
       document.getElementById('mainAppState').classList.remove('hidden');
     }
   }).catch(e => toast(e.message, 'err'));
+}
+
+/* ---------- while a user has no mess yet: watch for a pending/approved/declined join request ---------- */
+function watchMyJoinRequests(){
+  document.getElementById('mainAppState').classList.add('hidden');
+  if(joinReqUnsub){ joinReqUnsub(); joinReqUnsub = null; }
+  joinReqUnsub = db.collection('joinRequests').where('userId','==', currentUser.uid)
+    .onSnapshot(snap => {
+      const reqs = snap.docs.map(d => ({id:d.id, ...d.data()}));
+      const pending = reqs.find(r => r.status === 'pending');
+      const approved = reqs.find(r => r.status === 'approved');
+      if(pending){
+        document.getElementById('noMessState').classList.add('hidden');
+        document.getElementById('joinPendingState').classList.remove('hidden');
+        document.getElementById('joinPendingMessName').textContent = pending.messName || 'the mess';
+      } else if(approved){
+        // the manager has approved us and created our messMembers row — pick it up now
+        if(joinReqUnsub){ joinReqUnsub(); joinReqUnsub = null; }
+        loadUserAndMess();
+      } else {
+        document.getElementById('joinPendingState').classList.add('hidden');
+        document.getElementById('noMessState').classList.remove('hidden');
+        const declined = reqs.filter(r => r.status === 'declined')
+          .sort((a,b)=> (b.requestedAt ? b.requestedAt.toMillis() : 0) - (a.requestedAt ? a.requestedAt.toMillis() : 0))[0];
+        if(declined && !notifiedDeclinedReqIds.has(declined.id)){
+          notifiedDeclinedReqIds.add(declined.id);
+          toast('Your request to join ' + (declined.messName || 'that mess') + ' was declined.', 'err');
+        }
+      }
+    }, e => toast('Could not check join requests: ' + e.message, 'err'));
 }
 
 /* ============================================================
@@ -177,6 +213,10 @@ function createMess(){
     name: currentUserDoc.name, email: currentUserDoc.email,
     role: 'manager', deposit: 0,
     joinedAt: firebase.firestore.FieldValue.serverTimestamp()
+  })).then(()=> db.collection('managerHistory').add({
+    messId: messRef.id, userId: currentUser.uid, name: currentUserDoc.name,
+    startDate: todayStr(), endDate: null,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
   })).then(()=>{
     closeModal('createMessModal');
     toast('Mess created! Invite code: ' + inviteCode, 'ok');
@@ -193,19 +233,30 @@ function joinMess(){
   db.collection('mess').where('inviteCode','==', code).limit(1).get().then(snap => {
     if(snap.empty){ toast('No mess found with that code', 'err'); return; }
     const messDoc = snap.docs[0];
-    return db.collection('messMembers').doc(messDoc.id + '_' + currentUser.uid).set({
-      messId: messDoc.id, userId: currentUser.uid,
-      name: currentUserDoc.name, email: currentUserDoc.email,
-      role: 'member', deposit: 0,
-      joinedAt: firebase.firestore.FieldValue.serverTimestamp()
-    }).then(()=>{
-      closeModal('joinMessModal');
-      toast('Joined ' + messDoc.data().name + '!', 'ok');
-      currentMessId = messDoc.id; myRole = 'member';
-      document.getElementById('noMessState').classList.add('hidden');
-      document.getElementById('mainAppState').classList.remove('hidden');
-      attachMessListeners();
-    });
+    // Joining now requires the mess's manager to approve — check for an existing pending
+    // request first so tapping "Join" twice doesn't create duplicates.
+    return db.collection('joinRequests')
+      .where('messId','==', messDoc.id)
+      .where('userId','==', currentUser.uid)
+      .where('status','==','pending')
+      .limit(1).get()
+      .then(reqSnap => {
+        if(!reqSnap.empty){
+          closeModal('joinMessModal');
+          toast('You already have a pending request to join ' + messDoc.data().name, 'err');
+          return;
+        }
+        return db.collection('joinRequests').add({
+          messId: messDoc.id, messName: messDoc.data().name,
+          userId: currentUser.uid, name: currentUserDoc.name, email: currentUserDoc.email,
+          status: 'pending',
+          requestedAt: firebase.firestore.FieldValue.serverTimestamp()
+        }).then(()=>{
+          closeModal('joinMessModal');
+          toast('Request sent — waiting for the manager of ' + messDoc.data().name + ' to approve', 'ok');
+          watchMyJoinRequests();
+        });
+      });
   }).catch(e => toast(e.message, 'err'));
 }
 
@@ -242,13 +293,26 @@ function attachMessListeners(){
 
   const membersSub = db.collection('messMembers').where('messId','==', currentMessId).onSnapshot(snap => {
     messMembers = snap.docs.map(d => ({id: d.id, ...d.data()}));
+    // Role can change live (a manager hand-off happening elsewhere) — without this, a demoted
+    // manager's own browser kept treating them as manager until their next login, showing
+    // controls that Firestore would then reject. Keep myRole in sync with the live data.
+    const me = messMembers.find(m => m.userId === currentUser.uid);
+    if(me && me.role !== myRole){
+      const wasManager = myRole === 'manager';
+      myRole = me.role;
+      applyRoleUI();
+      toast(myRole === 'manager'
+        ? 'You are now the manager of this mess'
+        : (wasManager ? 'Your manager access has ended — you are now a regular member' : 'Your role was updated'),
+        myRole === 'manager' ? 'ok' : 'err');
+    }
     renderMemberTable();
     renderDepositSelect();
     loadMealsForDate(document.getElementById('mealDatePicker').value || todayStr());
     renderDashboard();
     renderNoticeScoreboard();
     generateMonthlyReport();
-    renderMealHistory();
+    renderManagerRequestsPanel();
   }, e => toast('Could not load members: ' + e.message, 'err'));
   unsubscribers.push(membersSub);
 
@@ -271,7 +335,6 @@ function attachMessListeners(){
     renderDashboard();
     renderNoticeScoreboard();
     generateMonthlyReport();
-    renderMealHistory();
   }, e => toast('Could not load meal records: ' + e.message, 'err'));
   unsubscribers.push(allMealsSub);
 
@@ -293,6 +356,27 @@ function attachMessListeners(){
   }, e => toast('Could not load guest requests: ' + e.message, 'err'));
   unsubscribers.push(guestReqSub);
 
+  // Members asking to become the mess's manager — only the current manager can approve/decline.
+  const managerReqSub = db.collection('managerRequests').where('messId','==', currentMessId).onSnapshot(snap => {
+    messManagerRequests = snap.docs.map(d => ({id:d.id, ...d.data({serverTimestamps: 'estimate'})}));
+    renderManagerRequestsPanel();
+    renderMemberTable();
+  }, e => toast('Could not load manager requests: ' + e.message, 'err'));
+  unsubscribers.push(managerReqSub);
+
+  // People who've asked to join this mess with the invite code — only the manager can approve/decline.
+  const joinReqSub = db.collection('joinRequests').where('messId','==', currentMessId).onSnapshot(snap => {
+    messJoinRequests = snap.docs.map(d => ({id:d.id, ...d.data({serverTimestamps: 'estimate'})}));
+    renderJoinRequestsPanel();
+  }, e => toast('Could not load join requests: ' + e.message, 'err'));
+  unsubscribers.push(joinReqSub);
+
+  // Append-only log of who has managed this mess and for how long.
+  const managerHistorySub = db.collection('managerHistory').where('messId','==', currentMessId).onSnapshot(snap => {
+    renderManagerHistory(snap.docs.map(d => ({id:d.id, ...d.data()})));
+  }, e => toast('Could not load manager history: ' + e.message, 'err'));
+  unsubscribers.push(managerHistorySub);
+
   const noticeSub = db.collection('notices').where('messId','==', currentMessId).onSnapshot(snap => {
     const notices = snap.docs.map(d => ({id:d.id, ...d.data({serverTimestamps: 'estimate'})}))
       .sort((a,b) => (b.createdAt ? b.createdAt.toMillis() : 0) - (a.createdAt ? a.createdAt.toMillis() : 0))
@@ -313,7 +397,6 @@ function attachMessListeners(){
     monthPicker.addEventListener('change', () => generateMonthlyReport());
   }
   generateMonthlyReport();
-  renderMealHistory();
   renderNoticeScoreboard();
 
   // The lunch → dinner switchover on the scoreboard is time-based, not event-based —
@@ -804,13 +887,23 @@ function renderMemberTable(){
     const tr = document.createElement('tr');
     const isSelf = mem.userId === currentUser.uid;
     if(isSelf) tr.style.background = 'var(--cream)';
+    let actionCell = '';
+    if(myRole === 'manager' && !isSelf){
+      actionCell = `
+        <button class="btn outline small" onclick="promoteMember('${mem.id}','${esc(mem.name)}','${mem.role}')">${mem.role==='manager' ? 'Make member' : 'Make manager'}</button>
+        <button class="btn danger small" style="margin-left:6px;" onclick="removeMember('${mem.id}','${esc(mem.name)}')">Remove</button>
+      `;
+    } else if(isSelf && myRole !== 'manager'){
+      const pending = messManagerRequests.find(r => r.memberId === currentUser.uid && r.status === 'pending');
+      actionCell = pending
+        ? `<span class="request-pending-badge">Awaiting approval</span>`
+        : `<button class="btn outline small" onclick="requestToBecomeManager()">Request to be manager</button>`;
+    }
     tr.innerHTML = `
       <td>${esc(mem.name)} ${isSelf ? '<span class="pill you">You</span>' : ''}</td>
       <td><span class="pill role">${mem.role}</span></td>
       <td class="mono">${money(mem.deposit)}</td>
-      <td class="manager-only hidden">
-        ${isSelf ? '' : `<button class="btn outline small" onclick="promoteMember('${mem.id}','${esc(mem.name)}','${mem.role}')">${mem.role==='manager' ? 'Make member' : 'Make manager'}</button>`}
-      </td>
+      <td>${actionCell}</td>
     `;
     tbody.appendChild(tr);
   });
@@ -824,16 +917,9 @@ function promoteMember(docId, name, currentRole){
     : `${name} will become a regular member and lose manager access.`;
   document.getElementById('promoteConfirmBtn').onclick = () => {
     if(newRole === 'manager'){
-      // Only one manager at a time: promoting this member demotes whoever currently holds the role,
-      // with no lingering access for them once this commits.
-      const batch = db.batch();
-      messMembers.forEach(m => {
-        if(m.role === 'manager' && m.id !== docId) batch.update(db.collection('messMembers').doc(m.id), {role: 'member'});
-      });
-      batch.update(db.collection('messMembers').doc(docId), {role: 'manager'});
       const target = messMembers.find(m => m.id === docId);
-      if(target) batch.update(db.collection('mess').doc(currentMessId), {managerIds: [target.userId]});
-      batch.commit()
+      if(!target) return;
+      transitionManagerTo(target.userId, name)
         .then(()=>{ closeModal('promoteModal'); toast(name + ' is now the manager', 'ok'); })
         .catch(e => toast(e.message, 'err'));
     } else {
@@ -844,6 +930,186 @@ function promoteMember(docId, name, currentRole){
   };
   openModal('promoteModal');
 }
+
+/* ---------- manager: permanently remove a member from the mess ---------- */
+function removeMember(docId, name){
+  document.getElementById('promoteModalTitle').textContent = 'Remove member';
+  document.getElementById('promoteModalBody').textContent =
+    `${name} will be permanently removed from this mess and lose access immediately. Their past meal, expense, and deposit records stay for reporting, but they'd need to request to join again to come back.`;
+  document.getElementById('promoteConfirmBtn').onclick = () => {
+    db.collection('messMembers').doc(docId).delete()
+      .then(()=>{ closeModal('promoteModal'); toast(name + ' has been removed from the mess', 'ok'); })
+      .catch(e => toast(e.message, 'err'));
+  };
+  openModal('promoteModal');
+}
+
+/* ============================================================
+   MANAGER HAND-OFF — there is only ever one manager at a time.
+   Used both when the current manager directly promotes someone, and
+   when the manager approves another member's "become manager" request.
+   Runs as a single atomic batch so every write (including the outgoing
+   manager demoting themselves) is authorized against their still-current
+   'manager' role at the moment the batch is evaluated.
+============================================================ */
+function transitionManagerTo(newManagerUserId, newManagerName){
+  const today = todayStr();
+  return db.collection('managerHistory')
+    .where('messId','==', currentMessId)
+    .where('endDate','==', null)
+    .get()
+    .then(openSnap => {
+      const batch = db.batch();
+      messMembers.forEach(m => {
+        if(m.role === 'manager' && m.userId !== newManagerUserId){
+          batch.update(db.collection('messMembers').doc(m.id), {role: 'member'});
+        }
+      });
+      const target = messMembers.find(m => m.userId === newManagerUserId);
+      if(target) batch.update(db.collection('messMembers').doc(target.id), {role: 'manager'});
+      batch.update(db.collection('mess').doc(currentMessId), {managerIds: [newManagerUserId]});
+
+      let alreadyOpenForNew = false;
+      openSnap.docs.forEach(d => {
+        if(d.data().userId === newManagerUserId) alreadyOpenForNew = true;
+        else batch.update(d.ref, {endDate: today});
+      });
+      if(!alreadyOpenForNew){
+        batch.set(db.collection('managerHistory').doc(), {
+          messId: currentMessId, userId: newManagerUserId, name: newManagerName,
+          startDate: today, endDate: null,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+      }
+      return batch.commit();
+    });
+}
+
+/* ---------- "become manager" requests: any member can ask, only the current manager decides ---------- */
+function requestToBecomeManager(){
+  if(myRole === 'manager') return;
+  const already = messManagerRequests.find(r => r.memberId === currentUser.uid && r.status === 'pending');
+  if(already){ toast('You already have a pending request.', 'err'); return; }
+  db.collection('managerRequests').add({
+    messId: currentMessId, memberId: currentUser.uid, memberName: currentUserDoc.name,
+    status: 'pending',
+    requestedAt: firebase.firestore.FieldValue.serverTimestamp()
+  }).then(()=> toast('Request sent to the current manager', 'ok'))
+    .catch(e => toast(e.message, 'err'));
+}
+function approveManagerRequest(reqId){
+  if(myRole !== 'manager') return;
+  const req = messManagerRequests.find(r => r.id === reqId);
+  if(!req) return;
+  transitionManagerTo(req.memberId, req.memberName)
+    .then(()=> db.collection('managerRequests').doc(reqId).update({
+      status: 'approved', respondedAt: firebase.firestore.FieldValue.serverTimestamp(), respondedBy: currentUser.uid
+    }))
+    .then(()=> toast(req.memberName + ' is now the manager', 'ok'))
+    .catch(e => toast(e.message, 'err'));
+}
+function rejectManagerRequest(reqId){
+  if(myRole !== 'manager') return;
+  db.collection('managerRequests').doc(reqId).update({
+    status: 'rejected',
+    respondedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    respondedBy: currentUser.uid
+  }).then(()=> toast('Request declined', 'ok')).catch(e => toast(e.message, 'err'));
+}
+function renderManagerRequestsPanel(){
+  const list = document.getElementById('managerRequestsList');
+  if(!list || myRole !== 'manager') return;
+  const pending = messManagerRequests.filter(r => r.status === 'pending');
+  if(!pending.length){
+    list.innerHTML = `<p style="font-size:13px; color:var(--ink-soft);">No pending manager requests right now.</p>`;
+    return;
+  }
+  list.innerHTML = pending.map(r => {
+    const when = r.requestedAt ? timeAgo(r.requestedAt.toDate()) : 'just now';
+    return `
+      <div class="request-row">
+        <div class="request-info">
+          <span class="request-tag guest">Manager</span><strong>${esc(r.memberName)}</strong> wants to become the manager
+          <span class="r-meta">Requested ${when}</span>
+        </div>
+        <div class="request-actions">
+          <button class="btn tiny approve" onclick="approveManagerRequest('${r.id}')">Approve</button>
+          <button class="btn tiny reject" onclick="rejectManagerRequest('${r.id}')">Decline</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+/* ---------- join requests: anyone with the invite code asks to join, only the manager decides ---------- */
+function approveJoinRequest(reqId){
+  if(myRole !== 'manager') return;
+  const req = messJoinRequests.find(r => r.id === reqId);
+  if(!req) return;
+  const batch = db.batch();
+  batch.set(db.collection('messMembers').doc(currentMessId + '_' + req.userId), {
+    messId: currentMessId, userId: req.userId,
+    name: req.name, email: req.email,
+    role: 'member', deposit: 0,
+    joinedAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+  batch.update(db.collection('joinRequests').doc(reqId), {
+    status: 'approved', respondedAt: firebase.firestore.FieldValue.serverTimestamp(), respondedBy: currentUser.uid
+  });
+  batch.commit()
+    .then(()=> toast(req.name + ' has joined the mess', 'ok'))
+    .catch(e => toast(e.message, 'err'));
+}
+function declineJoinRequest(reqId){
+  if(myRole !== 'manager') return;
+  db.collection('joinRequests').doc(reqId).update({
+    status: 'declined',
+    respondedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    respondedBy: currentUser.uid
+  }).then(()=> toast('Request declined', 'ok')).catch(e => toast(e.message, 'err'));
+}
+function renderJoinRequestsPanel(){
+  const list = document.getElementById('joinRequestsList');
+  if(!list || myRole !== 'manager') return;
+  const pending = messJoinRequests.filter(r => r.status === 'pending');
+  if(!pending.length){
+    list.innerHTML = `<p style="font-size:13px; color:var(--ink-soft);">No pending join requests right now.</p>`;
+    return;
+  }
+  list.innerHTML = pending.map(r => {
+    const when = r.requestedAt ? timeAgo(r.requestedAt.toDate()) : 'just now';
+    return `
+      <div class="request-row">
+        <div class="request-info">
+          <span class="request-tag guest">Join</span><strong>${esc(r.name)}</strong> wants to join this mess
+          <span class="r-meta">Requested ${when}${r.email ? ' · ' + esc(r.email) : ''}</span>
+        </div>
+        <div class="request-actions">
+          <button class="btn tiny approve" onclick="approveJoinRequest('${r.id}')">Approve</button>
+          <button class="btn tiny reject" onclick="declineJoinRequest('${r.id}')">Decline</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+/* ---------- manager history: who has run this mess, and for how long ---------- */
+function renderManagerHistory(history){
+  const wrap = document.getElementById('managerHistoryList');
+  if(!wrap) return;
+  if(!history.length){
+    wrap.innerHTML = `<p style="font-size:13px; color:var(--ink-soft);">No manager history yet — this starts logging from the mess's first manager hand-off.</p>`;
+    return;
+  }
+  const sorted = [...history].sort((a,b) => (a.startDate||'').localeCompare(b.startDate||''));
+  wrap.innerHTML = sorted.map((h, i) => `
+    <div class="manager-history-row">
+      <span class="mh-index">${i+1}.</span>
+      <span class="mh-name">${esc(h.name)}</span>
+      <span class="mh-range mono">${formatDateLabel(h.startDate)} → ${h.endDate ? formatDateLabel(h.endDate) : 'Present'}</span>
+      ${!h.endDate ? '<span class="pill on">Current</span>' : ''}
+    </div>
+  `).join('');
+}
+
 function renderDepositSelect(){
   const sel = document.getElementById('depositMemberSelect');
   const prevValue = sel.value;
@@ -1130,7 +1396,7 @@ function renderCycleMetric(){
     el.innerHTML = `<span class="cycle-empty">Not set</span>`;
     return;
   }
-  el.innerHTML = `<span class="cycle-date">${s ? formatDateLabel(s) : '—'}</span><span class="cycle-arrow">→</span><span class="cycle-date">${e ? formatDateLabel(e) : '—'}</span>`;
+  el.innerHTML = `<span>${s ? formatDateLabel(s) : '—'}</span><span class="cycle-sep">to</span><span>${e ? formatDateLabel(e) : '—'}</span>`;
 }
 
 function renderBalanceGlanceTable(rows){
@@ -1202,49 +1468,6 @@ function generateMonthlyReport(){
     `;
     tbody.appendChild(tr);
   });
-}
-
-/* ============================================================
-   MEAL HISTORY — last 30 calendar days, newest first. Reads straight
-   from the live allMealsCache/messMembers caches, no extra network call.
-============================================================ */
-function renderMealHistory(){
-  const tbody = document.querySelector('#mealHistoryTable tbody');
-  if(!tbody || !currentMessId) return;
-  if(!messMembers.length){
-    tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state">No members yet.</div></td></tr>`;
-    document.getElementById('mealHistoryRunningTotal').textContent = '0';
-    return;
-  }
-  const today = new Date();
-  let runningTotal = 0;
-  const rowsHtml = [];
-  for(let i = 0; i < 30; i++){
-    const d = new Date(today); d.setDate(d.getDate() - i);
-    const dateStr = d.toISOString().slice(0,10);
-    const doc = allMealsCache.find(md => md.date === dateStr);
-    const members = (doc && doc.members) || {};
-    let lunch = 0, dinner = 0, guest = 0, off = 0;
-    messMembers.forEach(m => {
-      const rec = members[m.userId] || {lunch:true, dinner:true, guestLunch:0, guestDinner:0};
-      if(rec.lunch) lunch++; else off++;
-      if(rec.dinner) dinner++; else off++;
-      guest += Number(rec.guestLunch || 0) + Number(rec.guestDinner || 0);
-    });
-    const total = lunch + dinner + guest;
-    runningTotal += total;
-    rowsHtml.push(`
-      <tr>
-        <td class="mono">${formatDateLabel(dateStr)}${dateStr === todayStr() ? ' <span class="pill you">Today</span>' : ''}</td>
-        <td class="mono">${lunch}</td>
-        <td class="mono">${dinner}</td>
-        <td class="mono">${guest}</td>
-        <td class="mono">${off}</td>
-        <td class="mono" style="font-weight:700;">${total}</td>
-      </tr>`);
-  }
-  tbody.innerHTML = rowsHtml.join('');
-  document.getElementById('mealHistoryRunningTotal').textContent = runningTotal;
 }
 
 function downloadReportAsJPG(){
