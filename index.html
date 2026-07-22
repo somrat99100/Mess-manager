@@ -337,6 +337,16 @@
     </div>
   </div>
 
+  <!-- Waiting for the mess manager to approve a join request -->
+  <div id="joinPendingState" class="app-content hidden">
+    <div class="wrap">
+      <div class="card panel" style="max-width:520px; margin:40px auto; text-align:center;">
+        <h3 style="margin-bottom:10px;">⏳ Waiting for approval</h3>
+        <p style="color:var(--ink-soft); font-size:14px;">Your request to join <strong id="joinPendingMessName">this mess</strong> has been sent. You'll get access as soon as the manager approves it.</p>
+      </div>
+    </div>
+  </div>
+
   <!-- Main app -->
   <div id="mainAppState" class="hidden">
     <div class="tabbar">
@@ -467,15 +477,6 @@
           <div style="overflow-x:auto;"><table id="dashboardMemberTable" class="balance-table"><thead><tr><th>Member</th><th>Deposit</th><th>☀️ Lunch</th><th>🌙 Dinner</th><th>Total Meals</th><th>Cost</th><th>Balance</th><th>Status</th></tr></thead><tbody></tbody></table></div>
         </div>
 
-        <!-- MEAL HISTORY — last 30 days -->
-        <div class="card panel">
-          <div class="panel-head"><h3>🗂️ Meal history — last 30 days</h3></div>
-          <div style="overflow-x:auto;"><table id="mealHistoryTable" class="report-table">
-            <thead><tr><th>Date</th><th>☀️ Lunch</th><th>🌙 Dinner</th><th>👤 Guest</th><th>🚫 Off</th><th>Total</th></tr></thead>
-            <tbody></tbody>
-          </table></div>
-          <p style="font-size:12.5px; color:var(--ink-soft); margin-top:12px;">30-day running total: <strong id="mealHistoryRunningTotal">0</strong> meals</p>
-        </div>
       </div>
 
       <!-- EXPENSES -->
@@ -504,9 +505,28 @@
           <p style="font-size:14px; color:var(--ink-soft); margin-bottom:10px;">Share this invite code — anyone with a Mess Manager Pro account can join your mess with it:</p>
           <div class="mono" id="inviteCodeDisplay" style="font-size:22px; font-weight:700; letter-spacing:.1em; color:var(--moss); background:var(--cream-deep); padding:14px; border-radius:10px; text-align:center;"></div>
         </div>
+
+        <!-- Manager: pending "join this mess" requests -->
+        <div class="card panel requests-panel manager-only hidden" id="joinRequestsPanelWrap">
+          <div class="panel-head"><h3>🚪 Pending join requests</h3></div>
+          <div id="joinRequestsList"></div>
+        </div>
+
+        <!-- Manager: pending "become manager" requests -->
+        <div class="card panel requests-panel manager-only hidden" id="managerRequestsPanelWrap">
+          <div class="panel-head"><h3>⏳ Pending manager requests</h3></div>
+          <div id="managerRequestsList"></div>
+        </div>
+
         <div class="card panel">
           <div class="panel-head"><h3>Mess members</h3></div>
-          <div style="overflow-x:auto;"><table id="memberTable"><thead><tr><th>Name</th><th>Role</th><th>Deposit</th><th class="manager-only hidden">Actions</th></tr></thead><tbody></tbody></table></div>
+          <div style="overflow-x:auto;"><table id="memberTable"><thead><tr><th>Name</th><th>Role</th><th>Deposit</th><th>Actions</th></tr></thead><tbody></tbody></table></div>
+        </div>
+
+        <div class="card panel">
+          <div class="panel-head"><h3>📜 Manager history</h3></div>
+          <p style="font-size:12.5px; color:var(--ink-soft); margin-bottom:12px;">Every manager hand-off is logged here — who managed the mess, and for how long.</p>
+          <div id="managerHistoryList"></div>
         </div>
       </div>
 

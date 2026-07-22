@@ -55,10 +55,17 @@ service cloud.firestore {
     match /messMembers/{docId} {
       allow read: if isSignedIn();
 
-      // Joining: a signed-in user may create their OWN membership row only.
-      allow create: if isSignedIn()
-                    && request.resource.data.userId == request.auth.uid
-                    && docId == request.resource.data.messId + '_' + request.auth.uid;
+      // Creating a brand-new mess: the creator immediately adds themself as its manager.
+      // Joining an existing mess now requires manager approval (see /joinRequests below), so a
+      // self-service create is only allowed here for role == 'manager'. Adding an approved member
+      // is instead done by the mess's current manager, on behalf of the approved user.
+      allow create: if isSignedIn() && (
+                      (request.resource.data.userId == request.auth.uid
+                       && docId == request.resource.data.messId + '_' + request.auth.uid
+                       && request.resource.data.role == 'manager') ||
+                      (isManagerOf(request.resource.data.messId)
+                       && docId == request.resource.data.messId + '_' + request.resource.data.userId)
+                    );
 
       // Updates: a manager can update any member row in their mess (role, deposit, name).
       // A member may only update their own "name" field (kept in sync with their profile) — nothing else.
@@ -137,6 +144,67 @@ service cloud.firestore {
                     );
 
       allow delete: if isManagerOf(resource.data.messId);
+    }
+
+    // ---------- managerRequests ----------
+    // A member asks to become the mess's manager; only the current manager can approve/decline
+    // (approval also runs the manager hand-off in the client). The requesting member may cancel
+    // their own still-pending request.
+    match /managerRequests/{reqId} {
+      allow read: if isSignedIn() && isMemberOf(resource.data.messId);
+
+      allow create: if isSignedIn()
+                    && isMemberOf(request.resource.data.messId)
+                    && request.resource.data.memberId == request.auth.uid
+                    && request.resource.data.status == 'pending';
+
+      allow update: if isSignedIn() && (
+                      isManagerOf(resource.data.messId) ||
+                      (request.auth.uid == resource.data.memberId &&
+                       resource.data.status == 'pending' &&
+                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) &&
+                       request.resource.data.status == 'cancelled')
+                    );
+
+      allow delete: if isManagerOf(resource.data.messId);
+    }
+
+    // ---------- joinRequests ----------
+    // A signed-in user asks to join a mess using its invite code; only that mess's manager can
+    // approve (which also creates the messMembers row in the client) or decline. Not yet a member
+    // of the mess, so the requester is allowed to read/create/cancel their own request by uid alone.
+    match /joinRequests/{reqId} {
+      allow read: if isSignedIn() && (
+                    request.auth.uid == resource.data.userId ||
+                    isMemberOf(resource.data.messId)
+                  );
+
+      allow create: if isSignedIn()
+                    && request.resource.data.userId == request.auth.uid
+                    && request.resource.data.status == 'pending';
+
+      allow update: if isSignedIn() && (
+                      isManagerOf(resource.data.messId) ||
+                      (request.auth.uid == resource.data.userId &&
+                       resource.data.status == 'pending' &&
+                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) &&
+                       request.resource.data.status == 'cancelled')
+                    );
+
+      allow delete: if isManagerOf(resource.data.messId);
+    }
+
+    // ---------- managerHistory ----------
+    // Append-only log of who has managed the mess and for how long. Only the manager who is
+    // still current AT THE MOMENT the write is evaluated can write it — the client submits every
+    // write for a hand-off (closing the outgoing record, opening the new one, demoting/promoting
+    // messMembers) as a single atomic batch, so the outgoing manager's own role hasn't flipped
+    // to 'member' yet when these rules are checked.
+    match /managerHistory/{recordId} {
+      allow read: if isSignedIn() && isMemberOf(resource.data.messId);
+      allow create: if isSignedIn() && isManagerOf(request.resource.data.messId);
+      allow update: if isSignedIn() && isManagerOf(resource.data.messId);
+      allow delete: if false;
     }
 
     // ---------- expenses ----------
