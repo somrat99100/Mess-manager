@@ -1126,7 +1126,11 @@ function renderCycleMetric(){
   const el = document.getElementById('mCycle');
   if(!el || !currentMessDoc) return;
   const s = currentMessDoc.cycleStart, e = currentMessDoc.cycleEnd;
-  el.textContent = (s || e) ? `${s ? formatDateLabel(s) : '—'} → ${e ? formatDateLabel(e) : '—'}` : 'Not set';
+  if(!s && !e){
+    el.innerHTML = `<span class="cycle-empty">Not set</span>`;
+    return;
+  }
+  el.innerHTML = `<span class="cycle-date">${s ? formatDateLabel(s) : '—'}</span><span class="cycle-arrow">→</span><span class="cycle-date">${e ? formatDateLabel(e) : '—'}</span>`;
 }
 
 function renderBalanceGlanceTable(rows){
