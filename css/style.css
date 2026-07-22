@@ -422,3 +422,56 @@ tr:last-child td{border-bottom:none;}
   .meal-card-row{grid-template-columns:1fr; text-align:left;}
   .mc-col{align-items:flex-start; flex-direction:row; gap:10px;}
 }
+
+/* ============================================================
+   NOTICE BOARD + LIVE SCOREBOARD (dashboard)
+============================================================ */
+.board-layout{display:grid; grid-template-columns:auto auto 1fr; align-items:center; gap:18px; padding:20px 26px 6px;}
+.scoreboard{display:flex; flex-direction:column; align-items:center; gap:10px; flex-shrink:0;}
+.scoreboard-ring{
+  width:112px; height:112px; border-radius:50%; display:flex; flex-direction:column; align-items:center; justify-content:center;
+  background:radial-gradient(circle at 35% 30%, rgba(255,255,255,0.16), rgba(255,255,255,0.02) 65%);
+  border:3px solid rgba(255,255,255,0.35); box-shadow:0 0 0 6px rgba(255,255,255,0.06), 0 10px 24px rgba(0,0,0,0.18);
+}
+.scoreboard-icon{font-size:18px; line-height:1;}
+.scoreboard-count{font-family:var(--font-display); font-size:38px; font-weight:700; color:#fff; line-height:1; margin-top:2px;}
+.scoreboard-label{font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:rgba(255,255,255,0.75); text-align:center; max-width:120px;}
+.board-arrow{font-size:26px; color:rgba(255,255,255,0.4); font-weight:300; flex-shrink:0;}
+.board-layout .notice-board-inner{padding:0; text-align:left; min-width:0;}
+.board-layout #noticeMain{margin:0; max-width:none;}
+.board-layout .btn-row{justify-content:flex-start;}
+@media(max-width:720px){
+  .board-layout{grid-template-columns:1fr; text-align:center; padding:20px 18px 4px;}
+  .board-arrow{display:none;}
+  .board-layout .notice-board-inner{text-align:center;}
+  .board-layout .btn-row{justify-content:center;}
+}
+
+/* dual guest chips (lunch + dinner side by side) */
+.guest-dual{display:flex; gap:6px; flex-wrap:wrap; justify-content:center;}
+.guest-chip.mini{padding:5px 10px; font-size:11.5px;}
+.request-pending-badge.mini{padding:5px 10px; font-size:10.5px;}
+
+/* ============================================================
+   MONTHLY REPORT
+============================================================ */
+.panel-head input[type="month"]{padding:9px 14px; border:1.5px solid var(--line); border-radius:10px; background:var(--paper); font-size:13.5px;}
+.report-banner{
+  display:flex; align-items:center; gap:10px; background:linear-gradient(120deg, var(--moss) 0%, var(--moss-dark) 100%);
+  color:#fff; padding:14px 22px; border-radius:12px 12px 0 0; font-family:var(--font-display); font-weight:700; font-size:16px;
+}
+.report-flag{font-size:18px;}
+.report-table{border:1px solid var(--line); border-top:none;}
+.report-table thead tr{background:var(--cream-deep);}
+.report-table th{border-bottom:2px solid var(--line);}
+.report-table tbody tr:nth-child(even){background:var(--cream);}
+.report-table td.neg{color:var(--bad); font-weight:700;}
+.report-table td.pos{color:var(--good); font-weight:700;}
+
+/* ============================================================
+   BALANCE-AT-A-GLANCE TABLE (relocated to Meals tab)
+============================================================ */
+.balance-table thead tr{background:var(--cream-deep);}
+.balance-table tbody tr{transition:background .15s ease;}
+.balance-table tbody tr:hover{background:var(--cream);}
+.balance-table td:first-child{font-weight:600;}
