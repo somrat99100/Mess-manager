@@ -288,12 +288,12 @@
   <div id="mainAppState" class="hidden">
     <div class="tabbar">
       <div class="wrap">
-        <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard')">📊 Dashboard</button>
-        <button class="tab-btn" data-tab="meals" onclick="switchTab('meals')">🗓️ Meals</button>
-        <button class="tab-btn" data-tab="expenses" onclick="switchTab('expenses')">💸 Expenses</button>
-        <button class="tab-btn" data-tab="members" onclick="switchTab('members')">🧑‍🤝‍🧑 Members</button>
-        <button class="tab-btn manager-only hidden" data-tab="settings" onclick="switchTab('settings')">⚙️ Mess Settings</button>
-        <button class="tab-btn" data-tab="profile" onclick="switchTab('profile')">👤 Profile</button>
+        <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard')">📊 <span>Dashboard</span></button>
+        <button class="tab-btn" data-tab="meals" onclick="switchTab('meals')">🗓️ <span>Meals</span><span class="tab-badge hidden" id="mealsTabBadge">0</span></button>
+        <button class="tab-btn" data-tab="expenses" onclick="switchTab('expenses')">💸 <span>Expenses</span></button>
+        <button class="tab-btn" data-tab="members" onclick="switchTab('members')">🧑‍🤝‍🧑 <span>Members</span></button>
+        <button class="tab-btn manager-only hidden" data-tab="settings" onclick="switchTab('settings')">⚙️ <span>Mess Settings</span></button>
+        <button class="tab-btn" data-tab="profile" onclick="switchTab('profile')">👤 <span>Profile</span></button>
       </div>
     </div>
 
@@ -310,24 +310,27 @@
               <p id="noticeMainText">No notices yet — be the first to post one.</p>
               <footer id="noticeMainMeta"></footer>
             </blockquote>
-            <button class="btn terra small" onclick="openModal('postNoticeModal')">Post a notice</button>
+            <div class="btn-row">
+              <button class="btn terra small" onclick="openModal('postNoticeModal')">Post a notice</button>
+              <button class="btn outline small hidden" id="seeAllNoticesBtn" onclick="openAllNoticesModal()">See all</button>
+            </div>
           </div>
           <div class="notice-history hidden" id="noticeHistoryWrap">
-            <div class="notice-history-head">Earlier notices</div>
+            <div class="notice-history-head">Recent</div>
             <div id="noticeHistoryList"></div>
           </div>
         </div>
 
-        <div class="grid-4">
-          <div class="card metric-card"><span class="m-label">💰 Total Collection</span><span class="m-value mono" id="mTotalCollection">৳0</span></div>
-          <div class="card metric-card terra"><span class="m-label">💸 Total Expense</span><span class="m-value mono" id="mTotalExpense">৳0</span></div>
-          <div class="card metric-card"><span class="m-label">🍱 Total Meals</span><span class="m-value mono" id="mTotalMeals">0</span></div>
-          <div class="card metric-card good"><span class="m-label">📊 Meal Rate</span><span class="m-value mono" id="mMealRate">৳0</span></div>
-        </div>
-        <div class="grid-3">
-          <div class="card metric-card"><span class="m-label">🏦 Remaining Fund</span><span class="m-value mono" id="mFund">৳0</span></div>
-          <div class="card metric-card"><span class="m-label">📈 Fund Status</span><span class="m-value" id="mStatus">—</span></div>
-          <div class="card metric-card"><span class="m-label">🙋 My Balance</span><span class="m-value mono" id="mMyBalance">৳0</span></div>
+        <div class="card metrics-panel">
+          <div class="metrics-grid">
+            <div class="metric-item"><div class="mi-icon">💰</div><div class="mi-text"><span class="mi-label">Total Collection</span><span class="mi-value mono" id="mTotalCollection">৳0</span></div></div>
+            <div class="metric-item terra"><div class="mi-icon">💸</div><div class="mi-text"><span class="mi-label">Total Expense</span><span class="mi-value mono" id="mTotalExpense">৳0</span></div></div>
+            <div class="metric-item"><div class="mi-icon">🍱</div><div class="mi-text"><span class="mi-label">Total Meals</span><span class="mi-value mono" id="mTotalMeals">0</span></div></div>
+            <div class="metric-item good"><div class="mi-icon">📊</div><div class="mi-text"><span class="mi-label">Meal Rate</span><span class="mi-value mono" id="mMealRate">৳0</span></div></div>
+            <div class="metric-item"><div class="mi-icon">🏦</div><div class="mi-text"><span class="mi-label">Remaining Fund</span><span class="mi-value mono" id="mFund">৳0</span></div></div>
+            <div class="metric-item"><div class="mi-icon">📈</div><div class="mi-text"><span class="mi-label">Fund Status</span><span class="mi-value" id="mStatus">—</span></div></div>
+            <div class="metric-item mine"><div class="mi-icon">🙋</div><div class="mi-text"><span class="mi-label">My Balance</span><span class="mi-value mono" id="mMyBalance">৳0</span></div></div>
+          </div>
         </div>
         <div class="card panel">
           <div class="panel-head"><h3>Member balances at a glance</h3></div>
@@ -365,9 +368,9 @@
           </div>
         </div>
 
-        <!-- Manager: pending meal-off requests -->
+        <!-- Manager: pending off / guest requests -->
         <div class="card panel requests-panel manager-only hidden" id="requestsPanelWrap">
-          <div class="panel-head"><h3>⏳ Pending meal-off requests</h3></div>
+          <div class="panel-head"><h3>⏳ Pending requests</h3></div>
           <div id="requestsList"></div>
         </div>
 
@@ -506,6 +509,38 @@
     <div class="modal-actions">
       <button class="btn outline small" onclick="closeModal('postNoticeModal')">Cancel</button>
       <button class="btn terra small" onclick="postNotice()">Post</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop hidden" id="allNoticesModal">
+  <div class="card modal" style="max-width:520px;">
+    <h3>All notices</h3>
+    <div id="allNoticesList" style="max-height:56vh; overflow-y:auto; display:flex; flex-direction:column; gap:4px;"></div>
+    <div class="modal-actions"><button class="btn outline small" onclick="closeModal('allNoticesModal')">Close</button></div>
+  </div>
+</div>
+
+<div class="modal-backdrop hidden" id="guestRequestModal">
+  <div class="card modal">
+    <h3>Request guest meals</h3>
+    <p id="guestRequestModalSub" style="font-size:13px; color:var(--ink-soft); margin-bottom:14px;">Ask your manager to add guest meals to your count for this day.</p>
+    <div class="field"><label>How many guest meals?</label><input type="number" id="guestRequestCount" min="1" value="1"></div>
+    <div class="modal-actions">
+      <button class="btn outline small" onclick="closeModal('guestRequestModal')">Cancel</button>
+      <button class="btn terra small" onclick="submitGuestRequest()">Send request</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop hidden" id="guestSetModal">
+  <div class="card modal">
+    <h3 id="guestSetModalTitle">Set guest meals</h3>
+    <p id="guestSetModalSub" style="font-size:13px; color:var(--ink-soft); margin-bottom:14px;"></p>
+    <div class="field"><label>Guest meal count</label><input type="number" id="guestSetCount" min="0" value="0"></div>
+    <div class="modal-actions">
+      <button class="btn outline small" onclick="closeModal('guestSetModal')">Cancel</button>
+      <button class="btn terra small" onclick="submitGuestSet()">Save</button>
     </div>
   </div>
 </div>

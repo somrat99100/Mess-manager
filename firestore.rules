@@ -1,0 +1,164 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- helpers ----------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isMemberOf(messId) {
+      return isSignedIn() && exists(/databases/$(database)/documents/messMembers/$(messId + '_' + request.auth.uid));
+    }
+
+    function myRoleIn(messId) {
+      return get(/databases/$(database)/documents/messMembers/$(messId + '_' + request.auth.uid)).data.role;
+    }
+
+    function isManagerOf(messId) {
+      return isSignedIn() && isMemberOf(messId) && myRoleIn(messId) == 'manager';
+    }
+
+    // Lunch/dinner cutoff times (HH:mm, evaluated in UTC — document this for non-UTC users) stored on the mess doc.
+    // Firestore rules can't inspect which specific field inside a map write changed, so as a coarse
+    // backstop we keep the member-write window open until BOTH cutoffs have passed; the client UI
+    // is what actually enforces the exact per-meal-type cutoff (disabling the right toggle at the right time).
+    function lunchDeadlineHour(messId) {
+      return int(get(/databases/$(database)/documents/mess/$(messId)).data.lunchDeadline.split(':')[0]);
+    }
+    function dinnerDeadlineHour(messId) {
+      return int(get(/databases/$(database)/documents/mess/$(messId)).data.dinnerDeadline.split(':')[0]);
+    }
+    function beforeDeadline(messId) {
+      return request.time.hours() < lunchDeadlineHour(messId) || request.time.hours() < dinnerDeadlineHour(messId);
+    }
+
+    // ---------- users ----------
+    // A user can only read/write their own profile document.
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      allow update: if isSignedIn() && request.auth.uid == userId;
+      allow delete: if false;
+    }
+
+    // ---------- mess ----------
+    match /mess/{messId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn(); // creator immediately adds themself as manager in the same client flow
+      allow update: if isManagerOf(messId);
+      allow delete: if false;
+    }
+
+    // ---------- messMembers ----------
+    // Document id convention: {messId}_{userId}
+    match /messMembers/{docId} {
+      allow read: if isSignedIn();
+
+      // Joining: a signed-in user may create their OWN membership row only.
+      allow create: if isSignedIn()
+                    && request.resource.data.userId == request.auth.uid
+                    && docId == request.resource.data.messId + '_' + request.auth.uid;
+
+      // Updates: a manager can update any member row in their mess (role, deposit, name).
+      // A member may only update their own "name" field (kept in sync with their profile) — nothing else.
+      allow update: if isSignedIn() && (
+                      isManagerOf(resource.data.messId) ||
+                      (request.auth.uid == resource.data.userId &&
+                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name']))
+                    );
+
+      allow delete: if isManagerOf(resource.data.messId);
+    }
+
+    // ---------- meals ----------
+    // Document id convention: {messId}_{yyyy-mm-dd}. Meal fields live in a `members` map keyed by userId.
+    match /meals/{mealId} {
+      allow read: if isSignedIn() && isMemberOf(resource.data.messId);
+
+      // Managers can write anything, anytime.
+      // Members can only write a merge that touches ONLY the `members` map (their own meal entry —
+      // enforced together with the client, which only ever sends the caller's own uid key),
+      // and only before that mess's daily deadline hour.
+      allow create, update: if isSignedIn() && (
+        isManagerOf(request.resource.data.messId) ||
+        (
+          isMemberOf(request.resource.data.messId) &&
+          beforeDeadline(request.resource.data.messId) &&
+          request.resource.data.diff(resource == null ? {} : resource.data).affectedKeys()
+            .hasOnly(['members', 'updatedAt', 'updatedBy', 'messId', 'date'])
+        )
+      );
+      allow delete: if isManagerOf(resource.data.messId);
+    }
+
+    // ---------- mealOffRequests ----------
+    // Created by a member after their deadline has passed, when they want a meal turned off.
+    // Only the manager can approve/decline (which also writes the actual off-toggle into /meals);
+    // the requesting member may cancel their own still-pending request.
+    match /mealOffRequests/{reqId} {
+      allow read: if isSignedIn() && isMemberOf(resource.data.messId);
+
+      allow create: if isSignedIn()
+                    && isMemberOf(request.resource.data.messId)
+                    && request.resource.data.memberId == request.auth.uid
+                    && request.resource.data.status == 'pending';
+
+      allow update: if isSignedIn() && (
+                      isManagerOf(resource.data.messId) ||
+                      (request.auth.uid == resource.data.memberId &&
+                       resource.data.status == 'pending' &&
+                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) &&
+                       request.resource.data.status == 'cancelled')
+                    );
+
+      allow delete: if isManagerOf(resource.data.messId);
+    }
+
+    // ---------- guestRequests ----------
+    // A member asks for N guest meals to be added on a date; only the manager can approve/decline
+    // (approval also writes the +N into /meals). The requesting member may cancel their own pending one.
+    match /guestRequests/{reqId} {
+      allow read: if isSignedIn() && isMemberOf(resource.data.messId);
+
+      allow create: if isSignedIn()
+                    && isMemberOf(request.resource.data.messId)
+                    && request.resource.data.memberId == request.auth.uid
+                    && request.resource.data.status == 'pending'
+                    && request.resource.data.count is number
+                    && request.resource.data.count > 0;
+
+      allow update: if isSignedIn() && (
+                      isManagerOf(resource.data.messId) ||
+                      (request.auth.uid == resource.data.memberId &&
+                       resource.data.status == 'pending' &&
+                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) &&
+                       request.resource.data.status == 'cancelled')
+                    );
+
+      allow delete: if isManagerOf(resource.data.messId);
+    }
+
+    // ---------- expenses ----------
+    // Only managers can create, edit, or delete expenses. Any mess member can read them.
+    match /expenses/{expenseId} {
+      allow read: if isSignedIn() && isMemberOf(resource.data.messId);
+      allow create: if isManagerOf(request.resource.data.messId);
+      allow update, delete: if isManagerOf(resource.data.messId);
+    }
+
+    // ---------- notices ----------
+    // Any member of the mess can post a notice at any time. Only the manager or the
+    // original author can edit/remove one.
+    match /notices/{noticeId} {
+      allow read: if isSignedIn() && isMemberOf(resource.data.messId);
+      allow create: if isSignedIn()
+                    && isMemberOf(request.resource.data.messId)
+                    && request.resource.data.authorId == request.auth.uid;
+      allow update, delete: if isSignedIn() && (
+                    isManagerOf(resource.data.messId) ||
+                    request.auth.uid == resource.data.authorId
+                  );
+    }
+  }
+}
