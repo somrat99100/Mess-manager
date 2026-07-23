@@ -41,7 +41,7 @@ const EMAILJS_PUBLIC_KEY    = '7JtKLnzVn99JXMGQO';
 const EMAILJS_SERVICE_ID    = 'service_77495rt';
 const EMAILJS_TEMPLATE_ID   = 'template_4hhkpa4';        // OTP code template
 const EMAILJS_NOTIFY_TEMPLATE_ID = 'template_uuagwk8'; // general notification template
-if(typeof emailjs !== 'undefined' && EMAILJS_PUBLIC_KEY !== '7JtKLnzVn99JXMGQO'){
+if(typeof emailjs !== 'undefined' && EMAILJS_PUBLIC_KEY !== 'YOUR_EMAILJS_PUBLIC_KEY'){
   emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY });
 }
 
@@ -49,7 +49,7 @@ if(typeof emailjs !== 'undefined' && EMAILJS_PUBLIC_KEY !== '7JtKLnzVn99JXMGQO')
    confirmations. Never blocks or breaks the action it's attached to: if EmailJS isn't
    configured yet, or a send fails (bad email, offline, etc.), we just log it quietly. */
 function sendNotificationEmail(toEmail, toName, subject, message){
-  if(typeof emailjs === 'undefined' || EMAILJS_PUBLIC_KEY === '7JtKLnzVn99JXMGQO') return;
+  if(typeof emailjs === 'undefined' || EMAILJS_PUBLIC_KEY === 'YOUR_EMAILJS_PUBLIC_KEY') return;
   if(!toEmail) return;
   emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_NOTIFY_TEMPLATE_ID, {
     to_email: toEmail, to_name: toName || toEmail, subject, message
