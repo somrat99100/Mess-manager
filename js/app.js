@@ -37,11 +37,11 @@ const db = firebase.firestore();
    5. Paste all four IDs below. That's it — no server, no secrets in code
       beyond this public key (EmailJS public keys are meant to be client-side).
 ============================================================ */
-const EMAILJS_PUBLIC_KEY    = 'YOUR_EMAILJS_PUBLIC_KEY';
-const EMAILJS_SERVICE_ID    = 'YOUR_EMAILJS_SERVICE_ID';
-const EMAILJS_TEMPLATE_ID   = 'YOUR_EMAILJS_TEMPLATE_ID';        // OTP code template
-const EMAILJS_NOTIFY_TEMPLATE_ID = 'YOUR_EMAILJS_NOTIFY_TEMPLATE_ID'; // general notification template
-if(typeof emailjs !== 'undefined' && EMAILJS_PUBLIC_KEY !== 'YOUR_EMAILJS_PUBLIC_KEY'){
+const EMAILJS_PUBLIC_KEY    = '7JtKLnzVn99JXMGQO';
+const EMAILJS_SERVICE_ID    = 'service_77495rt';
+const EMAILJS_TEMPLATE_ID   = 'template_4hhkpa4';        // OTP code template
+const EMAILJS_NOTIFY_TEMPLATE_ID = 'template_uuagwk8'; // general notification template
+if(typeof emailjs !== 'undefined' && EMAILJS_PUBLIC_KEY !== '7JtKLnzVn99JXMGQO'){
   emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY });
 }
 
@@ -49,7 +49,7 @@ if(typeof emailjs !== 'undefined' && EMAILJS_PUBLIC_KEY !== 'YOUR_EMAILJS_PUBLIC
    confirmations. Never blocks or breaks the action it's attached to: if EmailJS isn't
    configured yet, or a send fails (bad email, offline, etc.), we just log it quietly. */
 function sendNotificationEmail(toEmail, toName, subject, message){
-  if(typeof emailjs === 'undefined' || EMAILJS_PUBLIC_KEY === 'YOUR_EMAILJS_PUBLIC_KEY') return;
+  if(typeof emailjs === 'undefined' || EMAILJS_PUBLIC_KEY === '7JtKLnzVn99JXMGQO') return;
   if(!toEmail) return;
   emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_NOTIFY_TEMPLATE_ID, {
     to_email: toEmail, to_name: toName || toEmail, subject, message
