@@ -42,6 +42,14 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ---------- emailOtps ----------
+    // Document id convention: {uid} — one active code per user. Generated, emailed (via
+    // EmailJS), and checked entirely client-side, so only the user themself may ever
+    // read or write their own code; nobody else can see or tamper with it.
+    match /emailOtps/{uid} {
+      allow read, write: if isSignedIn() && request.auth.uid == uid;
+    }
+
     // ---------- mess ----------
     match /mess/{messId} {
       allow read: if isSignedIn();
@@ -75,7 +83,12 @@ service cloud.firestore {
                        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name']))
                     );
 
-      allow delete: if isManagerOf(resource.data.messId);
+      // A manager can remove any member. A member may also remove themself (leaving the mess
+      // to join a different one) — used from the Profile tab's "Change mess" option.
+      allow delete: if isSignedIn() && (
+                      isManagerOf(resource.data.messId) ||
+                      request.auth.uid == resource.data.userId
+                    );
     }
 
     // ---------- meals ----------
