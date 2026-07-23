@@ -53,7 +53,7 @@ function sendNotificationEmail(toEmail, toName, subject, message){
   if(!toEmail) return;
   emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_NOTIFY_TEMPLATE_ID, {
     to_email: toEmail, to_name: toName || toEmail, subject, message
-  }).catch(e => console.warn('Notification email failed:', e));
+  }, EMAILJS_PUBLIC_KEY).catch(e => console.warn('Notification email failed:', e));
 }
 
 
@@ -231,7 +231,7 @@ function sendOtpCode(){
     to_email: user.email,
     to_name: (currentUserDoc && currentUserDoc.name) || user.email,
     otp_code: code
-  })).then(()=>{
+  }, EMAILJS_PUBLIC_KEY)).then(()=>{
     lastOtpSentAt = now;
     toast('Verification code sent — check your email', 'ok');
     const input = document.getElementById('otpCodeInput');
