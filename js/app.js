@@ -19,6 +19,45 @@ const auth = firebase.auth();
 const db = firebase.firestore();
 
 /* ============================================================
+   EMAILJS SETUP (sends the 6-digit OTP code, and email notifications
+   for notices / meal-off confirmations / manager confirmations —
+   replace these values)
+   This all happens entirely from the browser (no backend server
+   needed) using EmailJS's free client-side email API.
+
+   To finish wiring this up:
+   1. Create a free account at https://www.emailjs.com
+   2. Add an "Email Service" (e.g. connect your Gmail) → copy its Service ID.
+   3. Create TWO "Email Template"s:
+      a) an OTP template whose body includes {{otp_code}}
+         (and preferably {{to_name}} / {{to_email}} too) → copy its Template ID.
+      b) a general notification template whose body includes {{subject}}
+         and {{message}} (and preferably {{to_name}} / {{to_email}}) → copy its Template ID.
+   4. Account → General → copy your "Public Key".
+   5. Paste all four IDs below. That's it — no server, no secrets in code
+      beyond this public key (EmailJS public keys are meant to be client-side).
+============================================================ */
+const EMAILJS_PUBLIC_KEY    = 'YOUR_EMAILJS_PUBLIC_KEY';
+const EMAILJS_SERVICE_ID    = 'YOUR_EMAILJS_SERVICE_ID';
+const EMAILJS_TEMPLATE_ID   = 'YOUR_EMAILJS_TEMPLATE_ID';        // OTP code template
+const EMAILJS_NOTIFY_TEMPLATE_ID = 'YOUR_EMAILJS_NOTIFY_TEMPLATE_ID'; // general notification template
+if(typeof emailjs !== 'undefined' && EMAILJS_PUBLIC_KEY !== 'YOUR_EMAILJS_PUBLIC_KEY'){
+  emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY });
+}
+
+/* Best-effort email notification — used for notices, meal-off confirmations, and manager
+   confirmations. Never blocks or breaks the action it's attached to: if EmailJS isn't
+   configured yet, or a send fails (bad email, offline, etc.), we just log it quietly. */
+function sendNotificationEmail(toEmail, toName, subject, message){
+  if(typeof emailjs === 'undefined' || EMAILJS_PUBLIC_KEY === 'YOUR_EMAILJS_PUBLIC_KEY') return;
+  if(!toEmail) return;
+  emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_NOTIFY_TEMPLATE_ID, {
+    to_email: toEmail, to_name: toName || toEmail, subject, message
+  }).catch(e => console.warn('Notification email failed:', e));
+}
+
+
+/* ============================================================
    GLOBAL STATE
 ============================================================ */
 let currentUser = null;       // firebase auth user
@@ -71,11 +110,13 @@ function genInviteCode(name){
 function showHomepage(){
   document.getElementById('homepage').classList.remove('hidden');
   document.getElementById('authScreen').classList.add('hidden');
+  document.getElementById('verifyEmailScreen').classList.add('hidden');
   document.getElementById('appShell').style.display = 'none';
 }
 function showAuth(mode){
   document.getElementById('homepage').classList.add('hidden');
   document.getElementById('appShell').style.display = 'none';
+  document.getElementById('verifyEmailScreen').classList.add('hidden');
   document.getElementById('authScreen').classList.remove('hidden');
   document.getElementById('loginForm').classList.toggle('hidden', mode !== 'login');
   document.getElementById('registerForm').classList.toggle('hidden', mode !== 'register');
@@ -85,7 +126,17 @@ function showAuth(mode){
 function showApp(){
   document.getElementById('homepage').classList.add('hidden');
   document.getElementById('authScreen').classList.add('hidden');
+  document.getElementById('verifyEmailScreen').classList.add('hidden');
   document.getElementById('appShell').style.display = 'block';
+}
+function showVerifyEmail(){
+  document.getElementById('homepage').classList.add('hidden');
+  document.getElementById('authScreen').classList.add('hidden');
+  document.getElementById('appShell').style.display = 'none';
+  document.getElementById('verifyEmailScreen').classList.remove('hidden');
+  document.getElementById('verifyEmailAddress').textContent = currentUser.email;
+  document.getElementById('otpCodeInput').value = '';
+  document.getElementById('verifyEmailError').classList.add('hidden');
 }
 
 /* ============================================================
@@ -104,9 +155,11 @@ function doRegister(){
   }
   auth.createUserWithEmailAndPassword(email, pass)
     .then(cred => db.collection('users').doc(cred.user.uid).set({
-      name, email, createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      name, email, otpVerified: false, createdAt: firebase.firestore.FieldValue.serverTimestamp()
     }))
-    .then(()=> toast('Account created — welcome!', 'ok'))
+    .then(()=> sendOtpCode())
+    // The auth-state listener picks up the new signed-in (but unverified) user and shows
+    // the OTP entry screen automatically — nothing else to do here on success.
     .catch(e => { errBox.textContent = e.message; errBox.classList.remove('hidden'); });
 }
 function doLogin(){
@@ -117,6 +170,29 @@ function doLogin(){
   auth.signInWithEmailAndPassword(email, pass)
     .catch(e => { errBox.textContent = e.message; errBox.classList.remove('hidden'); });
 }
+
+/* ---------- forgot password: Firebase's own built-in reset-link email ---------- */
+function openForgotPasswordModal(){
+  document.getElementById('forgotPasswordEmail').value = document.getElementById('loginEmail').value.trim();
+  document.getElementById('forgotPasswordError').classList.add('hidden');
+  openModal('forgotPasswordModal');
+}
+function sendPasswordReset(){
+  const email = document.getElementById('forgotPasswordEmail').value.trim();
+  const errBox = document.getElementById('forgotPasswordError');
+  errBox.classList.add('hidden');
+  if(!email){
+    errBox.textContent = 'Enter your account email first.';
+    errBox.classList.remove('hidden');
+    return;
+  }
+  auth.sendPasswordResetEmail(email)
+    .then(()=>{
+      closeModal('forgotPasswordModal');
+      toast('Password reset link sent — check your email', 'ok');
+    })
+    .catch(e => { errBox.textContent = e.message; errBox.classList.remove('hidden'); });
+}
 function doLogout(){
   unsubscribers.forEach(u => u());
   unsubscribers = [];
@@ -124,12 +200,103 @@ function doLogout(){
   auth.signOut();
 }
 
+/* ---------- email OTP verification (post-registration confirmation step) ----------
+   The 6-digit code is generated here in the client, stored in /emailOtps/{uid} (readable
+   and writable only by that same signed-in user — see firestore.rules), and emailed via
+   EmailJS (see the EMAILJS SETUP note near the top of this file). Once the entered code
+   matches, we flip our own users/{uid}.otpVerified flag, which is what actually gates
+   access to the app (see auth.onAuthStateChanged above). */
+function generateOtpCode(){
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+let lastOtpSentAt = 0;
+function sendOtpCode(){
+  const user = auth.currentUser;
+  if(!user) return;
+  const now = Date.now();
+  if(now - lastOtpSentAt < 30000){
+    toast('Please wait a few seconds before requesting another code.', 'err');
+    return;
+  }
+  if(typeof emailjs === 'undefined' || EMAILJS_PUBLIC_KEY === 'YOUR_EMAILJS_PUBLIC_KEY'){
+    toast('Email sending isn\'t configured yet — set EMAILJS_* values in js/app.js.', 'err');
+    return;
+  }
+  const code = generateOtpCode();
+  const expiresAt = firebase.firestore.Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000));
+  db.collection('emailOtps').doc(user.uid).set({
+    email: user.email, code, expiresAt, attempts: 0,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  }).then(()=> emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
+    to_email: user.email,
+    to_name: (currentUserDoc && currentUserDoc.name) || user.email,
+    otp_code: code
+  })).then(()=>{
+    lastOtpSentAt = now;
+    toast('Verification code sent — check your email', 'ok');
+    const input = document.getElementById('otpCodeInput');
+    if(input) input.value = '';
+  }).catch(e => toast('Could not send the code: ' + (e && e.text ? e.text : (e.message || e)), 'err'));
+}
+function verifyOtpCode(){
+  const user = auth.currentUser;
+  if(!user) return;
+  const entered = document.getElementById('otpCodeInput').value.trim();
+  const errBox = document.getElementById('verifyEmailError');
+  errBox.classList.add('hidden');
+  if(!/^\d{6}$/.test(entered)){
+    errBox.textContent = 'Enter the 6-digit code from your email.';
+    errBox.classList.remove('hidden');
+    return;
+  }
+  const otpRef = db.collection('emailOtps').doc(user.uid);
+  otpRef.get().then(doc => {
+    if(!doc.exists){
+      errBox.textContent = 'No code on file yet — tap "Resend code" below.';
+      errBox.classList.remove('hidden');
+      return;
+    }
+    const data = doc.data();
+    if(data.expiresAt && data.expiresAt.toDate() < new Date()){
+      errBox.textContent = 'That code has expired — tap "Resend code" for a new one.';
+      errBox.classList.remove('hidden');
+      return;
+    }
+    if((data.attempts || 0) >= 5){
+      errBox.textContent = 'Too many incorrect attempts — tap "Resend code" for a new one.';
+      errBox.classList.remove('hidden');
+      return;
+    }
+    if(entered !== data.code){
+      otpRef.update({attempts: firebase.firestore.FieldValue.increment(1)});
+      errBox.textContent = 'That code is incorrect — please try again.';
+      errBox.classList.remove('hidden');
+      return;
+    }
+    return db.collection('users').doc(user.uid).update({otpVerified: true})
+      .then(()=> otpRef.delete().catch(()=>{})) // best-effort cleanup; verification already succeeded either way
+      .then(()=>{
+        currentUserDoc = {...(currentUserDoc || {}), otpVerified: true};
+        showApp();
+        loadUserAndMess();
+      });
+  }).catch(e => { errBox.textContent = e.message; errBox.classList.remove('hidden'); });
+}
+
 auth.onAuthStateChanged(user => {
   if(user){
     currentUser = user;
-    loadUserAndMess();
+    db.collection('users').doc(user.uid).get().then(doc => {
+      currentUserDoc = doc.exists ? doc.data() : {name: user.email, email: user.email};
+      if(currentUserDoc.otpVerified){
+        loadUserAndMess();
+      } else {
+        showVerifyEmail();
+      }
+    }).catch(e => toast(e.message, 'err'));
   } else {
     currentUser = null;
+    currentUserDoc = null;
     showHomepage();
   }
 });
@@ -670,16 +837,27 @@ function approveMealOffRequest(reqId){
   })).then(()=>{
     toast(`${req.memberName}'s ${req.mealType} marked off`, 'ok');
     renderDashboard();
+    const mem = messMembers.find(m => m.userId === req.memberId);
+    sendNotificationEmail(mem && mem.email, req.memberName, 'Meal-off request approved',
+      `Your ${req.mealType} off-request for ${formatDateLabel(req.date)} has been approved — that meal is now marked off.`);
   }).catch(e => toast(e.message, 'err'));
 }
 
 function rejectMealOffRequest(reqId){
   if(myRole !== 'manager') return;
+  const req = messMealOffRequests.find(r => r.id === reqId);
   db.collection('mealOffRequests').doc(reqId).update({
     status: 'rejected',
     respondedAt: firebase.firestore.FieldValue.serverTimestamp(),
     respondedBy: currentUser.uid
-  }).then(()=> toast('Request declined', 'ok')).catch(e => toast(e.message, 'err'));
+  }).then(()=>{
+    toast('Request declined', 'ok');
+    if(req){
+      const mem = messMembers.find(m => m.userId === req.memberId);
+      sendNotificationEmail(mem && mem.email, req.memberName, 'Meal-off request declined',
+        `Your ${req.mealType} off-request for ${formatDateLabel(req.date)} was declined by your manager.`);
+    }
+  }).catch(e => toast(e.message, 'err'));
 }
 
 /* ---------- guest-meal requests: member asks for guest meals to be added, manager approves/declines ---------- */
@@ -944,6 +1122,36 @@ function removeMember(docId, name){
   openModal('promoteModal');
 }
 
+/* ---------- leave the current mess (from Profile) so a member can join a different one ---------- */
+function openLeaveMessModal(){
+  if(!currentMessId){ toast('You are not currently in a mess.', 'err'); return; }
+  if(myRole === 'manager' && messMembers.length > 1){
+    toast('Make another member the manager first (Members tab), then you can leave.', 'err');
+    return;
+  }
+  const messName = currentMessDoc ? currentMessDoc.name : 'this mess';
+  document.getElementById('promoteModalTitle').textContent = 'Leave this mess';
+  document.getElementById('promoteModalBody').textContent =
+    `You'll lose access to ${messName}. Your past meal, expense, and deposit records stay for reporting. You can create or join a different mess right after.`;
+  document.getElementById('promoteConfirmBtn').onclick = leaveMess;
+  openModal('promoteModal');
+}
+function leaveMess(){
+  const docId = currentMessId + '_' + currentUser.uid;
+  db.collection('messMembers').doc(docId).delete()
+    .then(()=>{
+      closeModal('promoteModal');
+      unsubscribers.forEach(u => u());
+      unsubscribers = [];
+      currentMessId = null; currentMessDoc = null; myRole = null; messMembers = [];
+      toast('You have left the mess — create or join a new one below.', 'ok');
+      document.getElementById('mainAppState').classList.add('hidden');
+      document.getElementById('joinPendingState').classList.add('hidden');
+      document.getElementById('noMessState').classList.remove('hidden');
+    })
+    .catch(e => toast(e.message, 'err'));
+}
+
 /* ============================================================
    MANAGER HAND-OFF — there is only ever one manager at a time.
    Used both when the current manager directly promotes someone, and
@@ -1005,16 +1213,31 @@ function approveManagerRequest(reqId){
     .then(()=> db.collection('managerRequests').doc(reqId).update({
       status: 'approved', respondedAt: firebase.firestore.FieldValue.serverTimestamp(), respondedBy: currentUser.uid
     }))
-    .then(()=> toast(req.memberName + ' is now the manager', 'ok'))
+    .then(()=>{
+      toast(req.memberName + ' is now the manager', 'ok');
+      const mem = messMembers.find(m => m.userId === req.memberId);
+      const messName = currentMessDoc ? currentMessDoc.name : 'your mess';
+      sendNotificationEmail(mem && mem.email, req.memberName, 'You are now the manager',
+        `Your request to become the manager of ${messName} has been approved — you now have full manager access.`);
+    })
     .catch(e => toast(e.message, 'err'));
 }
 function rejectManagerRequest(reqId){
   if(myRole !== 'manager') return;
+  const req = messManagerRequests.find(r => r.id === reqId);
   db.collection('managerRequests').doc(reqId).update({
     status: 'rejected',
     respondedAt: firebase.firestore.FieldValue.serverTimestamp(),
     respondedBy: currentUser.uid
-  }).then(()=> toast('Request declined', 'ok')).catch(e => toast(e.message, 'err'));
+  }).then(()=>{
+    toast('Request declined', 'ok');
+    if(req){
+      const mem = messMembers.find(m => m.userId === req.memberId);
+      const messName = currentMessDoc ? currentMessDoc.name : 'your mess';
+      sendNotificationEmail(mem && mem.email, req.memberName, 'Manager request declined',
+        `Your request to become the manager of ${messName} was declined.`);
+    }
+  }).catch(e => toast(e.message, 'err'));
 }
 function renderManagerRequestsPanel(){
   const list = document.getElementById('managerRequestsList');
@@ -1288,6 +1511,12 @@ function postNotice(){
     document.getElementById('noticeTextInput').value = '';
     closeModal('postNoticeModal');
     toast('Notice posted', 'ok');
+    const messName = currentMessDoc ? currentMessDoc.name : 'your mess';
+    messMembers.forEach(m => {
+      if(m.userId === currentUser.uid) return; // don't email the author their own notice
+      sendNotificationEmail(m.email, m.name, `New notice in ${messName}`,
+        `${currentUserDoc.name} posted a notice in ${messName}:\n\n"${text}"`);
+    });
   }).catch(e => toast(e.message, 'err'));
 }
 
