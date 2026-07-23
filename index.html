@@ -89,6 +89,9 @@
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
 
+<!-- ============ EMAILJS (sends the OTP verification code — see EMAILJS SETUP note in js/app.js) ============ -->
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+
 <!-- ============ REPORT EXPORT (PDF / JPG) ============ -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -289,6 +292,7 @@
       <div class="field"><label>Email</label><input type="email" id="loginEmail" autocomplete="email"></div>
       <div class="field"><label>Password</label><input type="password" id="loginPassword" autocomplete="current-password"></div>
       <button class="btn terra" style="width:100%;" onclick="doLogin()">Log in</button>
+      <div class="auth-toggle"><button onclick="openForgotPasswordModal()">Forgot password?</button></div>
       <div class="auth-toggle">New here? <button onclick="showAuth('register')">Create an account</button></div>
     </div>
 
@@ -304,6 +308,24 @@
     </div>
   </div>
 </div>
+
+<!-- ============================================================
+     EMAIL OTP VERIFICATION SCREEN — shown after registration (and on any
+     later login) until the account's email address is confirmed with the code.
+============================================================ -->
+<div id="verifyEmailScreen" class="hidden">
+  <div class="card auth-card">
+    <div class="brand"><svg viewBox="0 0 100 100" style="width:32px;height:32px;"><rect width="100" height="100" rx="22" fill="#2d5016"/><g fill="none" stroke="#f9f6f3" stroke-width="6" stroke-linecap="round"><line x1="32" y1="18" x2="32" y2="50"/><line x1="24" y1="18" x2="24" y2="34"/><line x1="40" y1="18" x2="40" y2="34"/><path d="M24 34 Q24 50 32 50 Q40 50 40 34"/><line x1="32" y1="50" x2="32" y2="84"/><path d="M68 18 C58 18 58 32 63 40 C66 45 68 46 68 52 L68 84"/></g></svg></div>
+    <h2>Confirm your email</h2>
+    <p class="sub">Enter the 6-digit code we sent to <strong id="verifyEmailAddress">your email</strong>. It expires in 10 minutes.</p>
+    <div id="verifyEmailError" class="auth-error hidden"></div>
+    <div class="field"><label>Verification code</label><input type="text" id="otpCodeInput" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="123456" style="letter-spacing:.35em; font-size:20px; text-align:center;"></div>
+    <button class="btn terra" style="width:100%;" onclick="verifyOtpCode()">Verify code</button>
+    <button class="btn outline" style="width:100%; margin-top:10px;" onclick="sendOtpCode()">Resend code</button>
+    <div class="auth-toggle">Wrong email address? <button onclick="doLogout(); showAuth('register');">Log out &amp; start over</button></div>
+  </div>
+</div>
+
 
 <!-- ============================================================
      APP SHELL
@@ -581,6 +603,12 @@
           <p style="font-size:13px; color:var(--ink-soft);">Current mess: <strong id="profMessName">—</strong></p>
           <p style="font-size:13px; color:var(--ink-soft);">My role: <strong id="profRole">—</strong></p>
         </div>
+
+        <div class="card panel" style="max-width:480px;">
+          <div class="panel-head"><h3>Change mess</h3></div>
+          <p style="font-size:13px; color:var(--ink-soft); margin-bottom:14px;">Need to switch to a different mess? Leaving removes your access to this one (your past meal, expense, and deposit records stay for reporting) — you can then create or join another right away.</p>
+          <button class="btn outline" onclick="openLeaveMessModal()">Leave this mess &amp; join another</button>
+        </div>
       </div>
 
     </div>
@@ -609,6 +637,19 @@
     <div class="modal-actions">
       <button class="btn outline small" onclick="closeModal('joinMessModal')">Cancel</button>
       <button class="btn terra small" onclick="joinMess()">Join mess</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop hidden" id="forgotPasswordModal">
+  <div class="card modal">
+    <h3>Reset your password</h3>
+    <p style="font-size:13px; color:var(--ink-soft); margin-bottom:14px;">Enter your account email — we'll send you a link to reset your password.</p>
+    <div class="field"><label>Email</label><input type="email" id="forgotPasswordEmail" autocomplete="email"></div>
+    <div id="forgotPasswordError" class="auth-error hidden"></div>
+    <div class="modal-actions">
+      <button class="btn outline small" onclick="closeModal('forgotPasswordModal')">Cancel</button>
+      <button class="btn terra small" onclick="sendPasswordReset()">Send reset link</button>
     </div>
   </div>
 </div>
