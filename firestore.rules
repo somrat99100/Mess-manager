@@ -29,8 +29,30 @@ service cloud.firestore {
     function dinnerDeadlineHour(messId) {
       return int(get(/databases/$(database)/documents/mess/$(messId)).data.dinnerDeadline.split(':')[0]);
     }
-    function beforeDeadline(messId) {
-      return request.time.hours() < lunchDeadlineHour(messId) || request.time.hours() < dinnerDeadlineHour(messId);
+    // meals doc id is always "{messId}_{yyyy-mm-dd}" — messId itself never contains an
+    // underscore (Firestore auto-ids don't use one), so splitting on '_' safely recovers both
+    // pieces straight from the path. This lets us evaluate rules WITHOUT reading `resource.data`,
+    // which is what's needed for reads/writes on dates that don't have a meals doc yet (e.g. a
+    // future date nobody has touched) — `resource` is null there, and referencing `resource.data`
+    // on a null resource is what previously caused "missing or insufficient permissions" errors.
+    function mealMessId(mealId) {
+      return mealId.split('_')[0];
+    }
+    function mealDateOf(mealId) {
+      let parts = mealId.split('_')[1].split('-');
+      return timestamp.date(int(parts[0]), int(parts[1]), int(parts[2]));
+    }
+    function todayDate() {
+      return timestamp.date(request.time.year(), request.time.month(), request.time.day());
+    }
+    // Members can always write today-or-future dates before the relevant cutoff HOUR; the
+    // date itself must not be in the past. Previously this only checked the current hour against
+    // the cutoffs with no notion of date at all, so once today's cutoff hour had passed, members
+    // (and the UI) were incorrectly locked out of editing FUTURE dates too.
+    function beforeDeadline(messId, mealId) {
+      return mealDateOf(mealId) > todayDate() ||
+             (mealDateOf(mealId) == todayDate() &&
+              (request.time.hours() < lunchDeadlineHour(messId) || request.time.hours() < dinnerDeadlineHour(messId)));
     }
 
     // ---------- users ----------
@@ -94,17 +116,19 @@ service cloud.firestore {
     // ---------- meals ----------
     // Document id convention: {messId}_{yyyy-mm-dd}. Meal fields live in a `members` map keyed by userId.
     match /meals/{mealId} {
-      allow read: if isSignedIn() && isMemberOf(resource.data.messId);
+      // Derived from the doc path (mealId), not resource.data — so this also works for a date
+      // that has no meals doc yet (resource is null), instead of erroring out as "permission denied".
+      allow read: if isSignedIn() && isMemberOf(mealMessId(mealId));
 
-      // Managers can write anything, anytime.
+      // Managers can write anything, anytime — any past, present, or future date.
       // Members can only write a merge that touches ONLY the `members` map (their own meal entry —
       // enforced together with the client, which only ever sends the caller's own uid key),
-      // and only before that mess's daily deadline hour.
+      // and only for today-or-future dates, before that mess's daily deadline hour on today.
       allow create, update: if isSignedIn() && (
         isManagerOf(request.resource.data.messId) ||
         (
           isMemberOf(request.resource.data.messId) &&
-          beforeDeadline(request.resource.data.messId) &&
+          beforeDeadline(request.resource.data.messId, mealId) &&
           request.resource.data.diff(resource == null ? {} : resource.data).affectedKeys()
             .hasOnly(['members', 'updatedAt', 'updatedBy', 'messId', 'date'])
         )

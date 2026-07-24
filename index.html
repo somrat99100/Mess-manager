@@ -357,7 +357,8 @@
   <!-- Account / more sheet — reachable from the avatar (all sizes) and the bottom nav's "More" tab (mobile) -->
   <div class="modal-backdrop hidden" id="moreSheetModal">
     <div class="card modal sheet-modal">
-      <div class="sheet-handle"></div>
+      <button class="sheet-close" onclick="closeModal('moreSheetModal')" aria-label="Close" title="Close">✕</button>
+      <div class="sheet-handle" onclick="closeModal('moreSheetModal')" title="Close" role="button" aria-label="Close"></div>
       <div class="sheet-user-row">
         <div class="avatar" id="moreSheetAvatar">?</div>
         <div>
