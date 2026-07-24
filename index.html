@@ -480,10 +480,16 @@
             </div>
           </div>
         </div>
+        <p style="font-size:12.5px; color:var(--ink-soft); margin:-14px 0 20px;">📅 Pick today or any future date above to switch your own lunch/dinner off in advance — each meal locks at its own cutoff time on the day itself.</p>
 
         <!-- Colorful-framed daily total box -->
         <div class="summary-frame">
           <div class="summary-box">
+            <div class="alltime-strip">
+              <span class="as-icon">🍽️</span>
+              <span class="as-label">All-time total meals</span>
+              <span class="as-value mono" id="allTimeTotalMeals">0</span>
+            </div>
             <div class="summary-eyebrow">Total meals</div>
             <div class="summary-total" id="dayTotalMeals">0<span class="unit">meals</span></div>
             <div class="summary-date" id="dayTotalDateLabel">—</div>
@@ -513,11 +519,15 @@
         <!-- MONTHLY REPORT -->
         <div class="card panel">
           <div class="panel-head">
-            <h3>📄 Monthly report</h3>
-            <input type="month" id="reportMonthPicker" class="mono">
+            <h3 id="reportPanelTitle">📄 Monthly report</h3>
           </div>
+          <div class="report-range-row">
+            <div class="field"><label>Report start</label><input type="date" id="reportStartDate" class="mono"></div>
+            <div class="field"><label>Report end</label><input type="date" id="reportEndDate" class="mono"></div>
+          </div>
+          <p class="report-range-hint" id="reportRangeHint"></p>
           <div id="monthlyReportCapture">
-            <div class="report-banner"><span class="report-flag">📄</span> <span id="reportBannerTitle">Monthly Report</span></div>
+            <div class="report-banner"><span class="report-flag">📄</span> <span id="reportBannerTitle">Mess Report</span></div>
             <div style="overflow-x:auto;"><table id="monthlyReportTable" class="report-table">
               <thead><tr><th>Member</th><th>Deposit (৳)</th><th>Lunch</th><th>Dinner</th><th>Total Meals</th><th>Meal Cost (৳)</th><th>Balance (৳)</th><th>Status</th></tr></thead>
               <tbody></tbody>
