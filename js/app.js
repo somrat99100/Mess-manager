@@ -244,6 +244,7 @@ function doLogout(){
   unsubscribers = [];
   if(joinReqUnsub){ joinReqUnsub(); joinReqUnsub = null; }
   if(window._scoreboardTicker){ clearInterval(window._scoreboardTicker); window._scoreboardTicker = null; }
+  if(window._dashboardTicker){ clearInterval(window._dashboardTicker); window._dashboardTicker = null; }
   auth.signOut();
 }
 
@@ -632,6 +633,14 @@ function attachMessListeners(){
   // tick it every 30s so it flips the moment the clock crosses the deadline.
   if(!window._scoreboardTicker){
     window._scoreboardTicker = setInterval(renderNoticeScoreboard, 30000);
+  }
+
+  // Total Meals (and All-time total meals) only count today once it hits its last hour —
+  // isMealDateFinalized() is time-based, so without a ticker the number would sit stale until
+  // the next unrelated data change happened to trigger a re-render. Tick every 30s so it rolls
+  // over right at the 23:00 boundary instead of waiting for someone to toggle a meal.
+  if(!window._dashboardTicker){
+    window._dashboardTicker = setInterval(renderDashboard, 30000);
   }
 }
 
@@ -1709,6 +1718,21 @@ function renderNoticeScoreboard(){
 /* ============================================================
    DASHBOARD CALCULATIONS
 ============================================================ */
+// A date's meals count as "finalized" for the headline Total Meals display once that date is
+// fully in the past, or — for today — once we're in today's last hour (23:00–23:59 local time).
+// Meals for today/future dates can still be toggled on/off right up to their cutoff, so counting
+// them into the running "All total meals" figure before the day is essentially over made that
+// number bounce around and overstate meals that hadn't actually happened yet. This only affects
+// the two Total Meals display metrics — meal rate and member balances still use every meal
+// (today's included), since a member owes for a meal the moment it's toggled on, not just once
+// the day is finalized.
+function isMealDateFinalized(dateStr){
+  const today = todayStr();
+  if(dateStr < today) return true;
+  if(dateStr > today) return false;
+  return new Date().getHours() === 23;
+}
+
 /* Tallies lunch/dinner (each including that meal's guest count) for every member across a
    given set of meal docs. Shared by the live dashboard and the monthly report. */
 function tallyMeals(mealDocs){
@@ -1738,14 +1762,15 @@ function renderDashboard(){
   if(!currentMessId) return;
   const totalExpense = cachedExpenses.reduce((s,e)=> s + Number(e.amount||0), 0);
   const {perMember, totalMeals} = tallyMeals(allMealsCache);
+  const finalizedTotalMeals = tallyMeals(allMealsCache.filter(d => d.date && isMealDateFinalized(d.date))).totalMeals;
   const totalDeposit = messMembers.reduce((s,m)=> s + Number(m.deposit||0), 0);
   const mealRate = totalMeals > 0 ? totalExpense / totalMeals : 0;
   const fund = totalDeposit - totalExpense;
 
   setMetric('mTotalCollection', money(totalDeposit));
   setMetric('mTotalExpense', money(totalExpense));
-  setMetric('mTotalMeals', totalMeals);
-  setMetric('allTimeTotalMeals', totalMeals);
+  setMetric('mTotalMeals', finalizedTotalMeals);
+  setMetric('allTimeTotalMeals', finalizedTotalMeals);
   setMetric('mMealRate', money(mealRate.toFixed(2)));
   setMetric('mFund', money(fund));
   // Three-tier fund health: Negative (in deficit), Low (positive but thin — couldn't
