@@ -474,7 +474,10 @@
         <div class="meals-head-row">
           <h2>Daily meal log</h2>
           <div class="date-field">
-            <input type="date" id="mealDatePicker" class="mono">
+            <div class="date-input-wrap">
+              <input type="date" id="mealDatePicker" class="mono">
+              <span class="date-display-overlay" id="mealDatePickerDisplay"></span>
+            </div>
             <div id="dayOffSwitchWrap" class="hidden" style="display:flex; align-items:center; gap:10px;">
               <span id="dayOffLabel" style="font-size:13px; font-weight:600; color:var(--ink-soft);"></span>
               <button id="dayOffToggle" class="meal-toggle" onclick="toggleDayOff()" title="Turn all meals on/off for this day"><span class="knob"></span></button>
@@ -523,8 +526,8 @@
             <h3 id="reportPanelTitle">📄 Monthly report</h3>
           </div>
           <div class="report-range-row">
-            <div class="field"><label>Report start</label><input type="date" id="reportStartDate" class="mono"></div>
-            <div class="field"><label>Report end</label><input type="date" id="reportEndDate" class="mono"></div>
+            <div class="field"><label>Report start</label><div class="date-input-wrap"><input type="date" id="reportStartDate" class="mono"><span class="date-display-overlay" id="reportStartDateDisplay"></span></div></div>
+            <div class="field"><label>Report end</label><div class="date-input-wrap"><input type="date" id="reportEndDate" class="mono"><span class="date-display-overlay" id="reportEndDateDisplay"></span></div></div>
           </div>
           <p class="report-range-hint" id="reportRangeHint"></p>
           <div id="monthlyReportCapture">
@@ -613,8 +616,8 @@
             <div class="field"><label>Dinner cutoff time (24h)</label><input type="time" id="setDinnerDeadline"></div>
           </div>
           <div class="grid-2">
-            <div class="field"><label>Mess cycle — start date</label><input type="date" id="setCycleStart"></div>
-            <div class="field"><label>Mess cycle — end date</label><input type="date" id="setCycleEnd"></div>
+            <div class="field"><label>Mess cycle — start date</label><div class="date-input-wrap"><input type="date" id="setCycleStart"><span class="date-display-overlay" id="setCycleStartDisplay"></span></div></div>
+            <div class="field"><label>Mess cycle — end date</label><div class="date-input-wrap"><input type="date" id="setCycleEnd"><span class="date-display-overlay" id="setCycleEndDisplay"></span></div></div>
           </div>
           <button class="btn terra" onclick="saveMessSettings()">Save settings</button>
         </div>
