@@ -493,6 +493,7 @@ function attachMessListeners(){
     document.getElementById('setDinnerDeadline').value = currentMessDoc.dinnerDeadline || '16:00';
     document.getElementById('setCycleStart').value = currentMessDoc.cycleStart || '';
     document.getElementById('setCycleEnd').value = currentMessDoc.cycleEnd || '';
+    syncDateDisplay('setCycleStart'); syncDateDisplay('setCycleEnd');
     const resetLabel = document.getElementById('resetMessNameLabel');
     if(resetLabel) resetLabel.textContent = currentMessDoc.name || 'this mess';
     renderMealDeadlineNote();
@@ -599,7 +600,8 @@ function attachMessListeners(){
   if(!document.getElementById('mealDatePicker').value){
     document.getElementById('mealDatePicker').value = todayStr();
   }
-  document.getElementById('mealDatePicker').addEventListener('change', e => loadMealsForDate(e.target.value));
+  syncDateDisplay('mealDatePicker');
+  document.getElementById('mealDatePicker').addEventListener('change', e => { syncDateDisplay('mealDatePicker'); loadMealsForDate(e.target.value); });
   loadMealsForDate(document.getElementById('mealDatePicker').value);
 
   const reportStartInput = document.getElementById('reportStartDate');
@@ -747,6 +749,37 @@ function formatDateLabel(dateStr){
   if(isNaN(d)) return dateStr;
   return d.toLocaleDateString('en-GB', {day:'2-digit', month:'short', year:'numeric'});
 }
+
+// Native <input type="date"> renders its text in whatever format the device's OS locale uses
+// (commonly MM/DD/YYYY on many phones, regardless of the phone's region) — that can't be
+// controlled from HTML/CSS. Each date input is paired with a small overlay span
+// (id = inputId + 'Display') sitting on top of it that shows a consistent "24-Jul-26" format
+// instead; the real input's own text is made transparent via CSS so only our overlay is visible,
+// while taps still land on the native input and open its normal picker.
+function formatDateShort(dateStr){
+  if(!dateStr) return 'Select date';
+  const d = new Date(dateStr + 'T00:00:00');
+  if(isNaN(d)) return dateStr;
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = d.toLocaleDateString('en-GB', {month:'short'});
+  const year = String(d.getFullYear()).slice(-2);
+  return `${day}-${month}-${year}`;
+}
+function syncDateDisplay(inputId){
+  const input = document.getElementById(inputId);
+  const label = document.getElementById(inputId + 'Display');
+  if(!input || !label) return;
+  label.textContent = formatDateShort(input.value);
+}
+function syncAllDateDisplays(){
+  ['mealDatePicker','reportStartDate','reportEndDate','setCycleStart','setCycleEnd'].forEach(syncDateDisplay);
+}
+// Fires on every user-driven pick (native pickers emit both 'input' and 'change'; either is enough).
+['mealDatePicker','reportStartDate','reportEndDate','setCycleStart','setCycleEnd'].forEach(id => {
+  const el = document.getElementById(id);
+  if(el) el.addEventListener('input', () => syncDateDisplay(id));
+});
+syncAllDateDisplays();
 
 /* Daily total meal count — colorful summary box at the top of the Meals tab */
 function renderDaySummary(dateStr){
@@ -1653,9 +1686,9 @@ function renderNoticeScoreboard(){
   const members = (todayDoc && todayDoc.members) || {};
   let count = 0;
   messMembers.forEach(m => {
-    const rec = members[m.userId] || {lunch:true, dinner:true, guestLunch:0, guestDinner:0};
-    if(phase === 'lunch') count += (rec.lunch ? 1 : 0) + Number(rec.guestLunch || 0);
-    else count += (rec.dinner ? 1 : 0) + Number(rec.guestDinner || 0);
+    const rec = normalizeMealRec(members[m.userId]);
+    if(phase === 'lunch') count += (rec.lunch ? 1 : 0) + rec.guestLunch;
+    else count += (rec.dinner ? 1 : 0) + rec.guestDinner;
   });
   countEl.textContent = count;
   document.getElementById('scoreboardIcon').textContent = phase === 'lunch' ? '☀️' : '🌙';
@@ -1805,6 +1838,7 @@ function initReportRangeInputs(){
       ? `📅 Limited to the current mess cycle: ${cycleStart ? formatDateLabel(cycleStart) : '—'} to ${cycleEnd ? formatDateLabel(cycleEnd) : '—'}.`
       : `📅 No mess cycle set yet — the manager can set one in Settings to limit report dates.`;
   }
+  syncDateDisplay('reportStartDate'); syncDateDisplay('reportEndDate');
 }
 
 function generateMonthlyReport(){
