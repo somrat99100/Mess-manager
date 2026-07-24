@@ -480,6 +480,7 @@ function attachMessListeners(){
     renderMealDeadlineNote();
     renderNoticeScoreboard();
     renderCycleMetric();
+    generateMonthlyReport();
   }, e => toast('Could not load mess details: ' + e.message, 'err'));
   unsubscribers.push(messSub);
 
@@ -583,10 +584,15 @@ function attachMessListeners(){
   document.getElementById('mealDatePicker').addEventListener('change', e => loadMealsForDate(e.target.value));
   loadMealsForDate(document.getElementById('mealDatePicker').value);
 
-  const monthPicker = document.getElementById('reportMonthPicker');
-  if(monthPicker){
-    if(!monthPicker.value) monthPicker.value = todayStr().slice(0,7);
-    monthPicker.addEventListener('change', () => generateMonthlyReport());
+  const reportStartInput = document.getElementById('reportStartDate');
+  const reportEndInput = document.getElementById('reportEndDate');
+  if(reportStartInput && !reportStartInput.dataset.wired){
+    reportStartInput.dataset.wired = '1';
+    reportStartInput.addEventListener('change', () => generateMonthlyReport());
+  }
+  if(reportEndInput && !reportEndInput.dataset.wired){
+    reportEndInput.dataset.wired = '1';
+    reportEndInput.addEventListener('change', () => generateMonthlyReport());
   }
   generateMonthlyReport();
   renderNoticeScoreboard();
@@ -806,21 +812,28 @@ function renderMealCards(dateStr){
     const dinnerPending = pendingOffForDate.find(r => r.memberId === mem.userId && r.mealType === 'dinner');
     const guestPending = pendingGuestForDate.find(r => r.memberId === mem.userId);
 
-    // Deadline passed but meal is still ON: the member can ask the manager to turn it off instead.
-    const canRequestLunch = !isManager && isSelf && !currentDayOff && !isPastDay && rec.lunch && !canEditLunch && !lunchPending;
-    const canRequestDinner = !isManager && isSelf && !currentDayOff && !isPastDay && rec.dinner && !canEditDinner && !dinnerPending;
+    // Deadline passed but meal is still ON: the member can ask the manager to turn it off.
+    // Deadline passed and meal is OFF: the member can ask the manager to turn it back on instead.
+    const canRequestLunchOff = !isManager && isSelf && !currentDayOff && !isPastDay && rec.lunch && !canEditLunch && !lunchPending;
+    const canRequestLunchOn = !isManager && isSelf && !currentDayOff && !isPastDay && !rec.lunch && !canEditLunch && !lunchPending;
+    const canRequestDinnerOff = !isManager && isSelf && !currentDayOff && !isPastDay && rec.dinner && !canEditDinner && !dinnerPending;
+    const canRequestDinnerOn = !isManager && isSelf && !currentDayOff && !isPastDay && !rec.dinner && !canEditDinner && !dinnerPending;
 
     const lunchCell = lunchPending
-      ? `<span class="request-pending-badge">Awaiting approval</span>`
-      : canRequestLunch
-        ? `<button class="btn-request-off" onclick="requestMealOff('${dateStr}','lunch')">Request off</button>`
-        : `<button class="meal-toggle ${rec.lunch ? 'on':''}" ${canEditLunch?'':'disabled'} onclick="toggleMeal('${dateStr}','${mem.userId}','lunch')"><span class="knob"></span></button>`;
+      ? `<span class="request-pending-badge">${lunchPending.desiredState === true ? 'Turning on' : 'Turning off'}</span>`
+      : canRequestLunchOff
+        ? `<button class="btn-request-off" onclick="requestMealOff('${dateStr}','lunch',false)">Request off</button>`
+        : canRequestLunchOn
+          ? `<button class="btn-request-on" onclick="requestMealOff('${dateStr}','lunch',true)">Request on</button>`
+          : `<button class="meal-toggle ${rec.lunch ? 'on':''}" ${canEditLunch?'':'disabled'} onclick="toggleMeal('${dateStr}','${mem.userId}','lunch')"><span class="knob"></span></button>`;
 
     const dinnerCell = dinnerPending
-      ? `<span class="request-pending-badge">Awaiting approval</span>`
-      : canRequestDinner
-        ? `<button class="btn-request-off" onclick="requestMealOff('${dateStr}','dinner')">Request off</button>`
-        : `<button class="meal-toggle ${rec.dinner ? 'on':''}" ${canEditDinner?'':'disabled'} onclick="toggleMeal('${dateStr}','${mem.userId}','dinner')"><span class="knob"></span></button>`;
+      ? `<span class="request-pending-badge">${dinnerPending.desiredState === true ? 'Turning on' : 'Turning off'}</span>`
+      : canRequestDinnerOff
+        ? `<button class="btn-request-off" onclick="requestMealOff('${dateStr}','dinner',false)">Request off</button>`
+        : canRequestDinnerOn
+          ? `<button class="btn-request-on" onclick="requestMealOff('${dateStr}','dinner',true)">Request on</button>`
+          : `<button class="meal-toggle ${rec.dinner ? 'on':''}" ${canEditDinner?'':'disabled'} onclick="toggleMeal('${dateStr}','${mem.userId}','dinner')"><span class="knob"></span></button>`;
 
     // Guest meals — manager taps a chip to set that meal's exact count directly; a member taps
     // their own chip to request guest meals be added for lunch or dinner (goes to the manager for approval).
@@ -853,18 +866,22 @@ function renderMealCards(dateStr){
   });
 }
 
-/* ---------- meal-off requests: member asks after the deadline, manager approves/declines ---------- */
-function requestMealOff(dateStr, mealType){
+/* ---------- meal on/off requests: member asks after the deadline, manager approves/declines ----------
+   desiredState=false -> member wants that meal turned OFF (they missed the cutoff while it was on)
+   desiredState=true  -> member wants that meal turned back ON (they missed the cutoff while it was off) */
+function requestMealOff(dateStr, mealType, desiredState){
   if(myRole === 'manager') return;
   if(dateStr < todayStr()){ toast('Past days can\u2019t be changed.', 'err'); return; }
+  const wantsOn = desiredState === true;
   const already = messMealOffRequests.find(r => r.date === dateStr && r.mealType === mealType && r.memberId === currentUser.uid && r.status === 'pending');
   if(already){ toast('You already have a pending request for this meal.', 'err'); return; }
   db.collection('mealOffRequests').add({
     messId: currentMessId, date: dateStr, mealType,
+    desiredState: wantsOn,
     memberId: currentUser.uid, memberName: currentUserDoc.name,
     status: 'pending',
     requestedAt: firebase.firestore.FieldValue.serverTimestamp()
-  }).then(()=> toast('Off-request sent to your manager', 'ok'))
+  }).then(()=> toast(wantsOn ? 'Request to turn this meal back on sent to your manager' : 'Off-request sent to your manager', 'ok'))
     .catch(e => toast(e.message, 'err'));
 }
 
@@ -872,20 +889,21 @@ function approveMealOffRequest(reqId){
   if(myRole !== 'manager') return;
   const req = messMealOffRequests.find(r => r.id === reqId);
   if(!req) return;
+  const wantsOn = req.desiredState === true;
   const mealId = currentMessId + '_' + req.date;
   db.collection('meals').doc(mealId).set({
     messId: currentMessId, date: req.date,
-    members: { [req.memberId]: { [req.mealType]: false } },
+    members: { [req.memberId]: { [req.mealType]: wantsOn } },
     updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
     updatedBy: currentUser.uid
   }, {merge: true}).then(()=> db.collection('mealOffRequests').doc(reqId).update({
     status: 'approved', respondedAt: firebase.firestore.FieldValue.serverTimestamp(), respondedBy: currentUser.uid
   })).then(()=>{
-    toast(`${req.memberName}'s ${req.mealType} marked off`, 'ok');
+    toast(`${req.memberName}'s ${req.mealType} marked ${wantsOn ? 'on' : 'off'}`, 'ok');
     renderDashboard();
     const mem = messMembers.find(m => m.userId === req.memberId);
-    sendNotificationEmail(mem && mem.email, req.memberName, 'Meal-off request approved',
-      `Your ${req.mealType} off-request for ${formatDateLabel(req.date)} has been approved — that meal is now marked off.`);
+    sendNotificationEmail(mem && mem.email, req.memberName, `Meal-${wantsOn ? 'on' : 'off'} request approved`,
+      `Your ${req.mealType} request for ${formatDateLabel(req.date)} has been approved — that meal is now marked ${wantsOn ? 'on' : 'off'}.`);
   }).catch(e => toast(e.message, 'err'));
 }
 
@@ -899,9 +917,10 @@ function rejectMealOffRequest(reqId){
   }).then(()=>{
     toast('Request declined', 'ok');
     if(req){
+      const wantsOn = req.desiredState === true;
       const mem = messMembers.find(m => m.userId === req.memberId);
-      sendNotificationEmail(mem && mem.email, req.memberName, 'Meal-off request declined',
-        `Your ${req.mealType} off-request for ${formatDateLabel(req.date)} was declined by your manager.`);
+      sendNotificationEmail(mem && mem.email, req.memberName, `Meal-${wantsOn ? 'on' : 'off'} request declined`,
+        `Your ${req.mealType} request (to turn it ${wantsOn ? 'on' : 'off'}) for ${formatDateLabel(req.date)} was declined by your manager.`);
     }
   }).catch(e => toast(e.message, 'err'));
 }
@@ -990,10 +1009,11 @@ function renderRequestsPanel(){
   list.innerHTML = pending.map(r => {
     const when = r.requestedAt ? timeAgo(r.requestedAt.toDate()) : 'just now';
     if(r.kind === 'off'){
+      const wantsOn = r.desiredState === true;
       return `
       <div class="request-row">
         <div class="request-info">
-          <span class="request-tag off">Off</span><strong>${esc(r.memberName)}</strong> wants ${esc(r.mealType)} off on ${esc(formatDateLabel(r.date))}
+          <span class="request-tag off">${wantsOn ? 'On' : 'Off'}</span><strong>${esc(r.memberName)}</strong> wants ${esc(r.mealType)} ${wantsOn ? 'turned back on' : 'off'} on ${esc(formatDateLabel(r.date))}
           <span class="r-meta">Requested ${when}</span>
         </div>
         <div class="request-actions">
@@ -1634,6 +1654,7 @@ function renderDashboard(){
   setMetric('mTotalCollection', money(totalDeposit));
   setMetric('mTotalExpense', money(totalExpense));
   setMetric('mTotalMeals', totalMeals);
+  setMetric('allTimeTotalMeals', totalMeals);
   setMetric('mMealRate', money(mealRate.toFixed(2)));
   setMetric('mFund', money(fund));
   // Three-tier fund health: Negative (in deficit), Low (positive but thin — couldn't
@@ -1701,32 +1722,81 @@ function renderBalanceGlanceTable(rows){
 }
 
 /* ============================================================
-   MONTHLY REPORT — mirrors the dashboard math but scoped to one
-   calendar month, with a Download as PDF / JPG option.
+   MONTHLY / CYCLE REPORT — mirrors the dashboard math but scoped to a
+   date range, clamped to the mess's current manager cycle (if one is
+   set), with a Download as PDF / JPG option.
+   Managers see and download every member's row together; a regular
+   member only ever sees and downloads their own row.
 ============================================================ */
+// Keeps the report's start/end date inputs within the current mess cycle (if the
+// manager has set one) and fills in sensible defaults the first time they're empty.
+function initReportRangeInputs(){
+  const startInput = document.getElementById('reportStartDate');
+  const endInput = document.getElementById('reportEndDate');
+  if(!startInput || !endInput) return;
+  const cycleStart = currentMessDoc && currentMessDoc.cycleStart;
+  const cycleEnd = currentMessDoc && currentMessDoc.cycleEnd;
+
+  startInput.min = cycleStart || '';
+  startInput.max = cycleEnd || '';
+  endInput.min = cycleStart || '';
+  endInput.max = cycleEnd || '';
+
+  if(!startInput.value) startInput.value = cycleStart || todayStr().slice(0,8) + '01';
+  if(!endInput.value) endInput.value = cycleEnd || todayStr();
+
+  // If a cycle is set, clamp any out-of-range value back inside it (e.g. after a manager
+  // hand-off shrinks the active cycle).
+  if(cycleStart && startInput.value < cycleStart) startInput.value = cycleStart;
+  if(cycleEnd && startInput.value > cycleEnd) startInput.value = cycleEnd;
+  if(cycleStart && endInput.value < cycleStart) endInput.value = cycleStart;
+  if(cycleEnd && endInput.value > cycleEnd) endInput.value = cycleEnd;
+
+  const hintEl = document.getElementById('reportRangeHint');
+  if(hintEl){
+    hintEl.textContent = (cycleStart || cycleEnd)
+      ? `📅 Limited to the current mess cycle: ${cycleStart ? formatDateLabel(cycleStart) : '—'} to ${cycleEnd ? formatDateLabel(cycleEnd) : '—'}.`
+      : `📅 No mess cycle set yet — the manager can set one in Settings to limit report dates.`;
+  }
+}
+
 function generateMonthlyReport(){
   const table = document.getElementById('monthlyReportTable');
   if(!table || !currentMessId) return;
-  const picker = document.getElementById('reportMonthPicker');
-  const monthStr = (picker && picker.value) || todayStr().slice(0,7); // 'YYYY-MM'
+  initReportRangeInputs();
+
+  const startInput = document.getElementById('reportStartDate');
+  const endInput = document.getElementById('reportEndDate');
+  let startStr = (startInput && startInput.value) || todayStr().slice(0,8) + '01';
+  let endStr = (endInput && endInput.value) || todayStr();
+  if(startStr > endStr){ const tmp = startStr; startStr = endStr; endStr = tmp; }
+
   const titleEl = document.getElementById('reportBannerTitle');
+  const isManager = myRole === 'manager';
   if(titleEl){
-    const label = new Date(monthStr + '-01T00:00:00').toLocaleDateString('en-GB', {month:'long', year:'numeric'});
-    titleEl.textContent = 'Monthly Report — ' + label;
+    titleEl.textContent = `${isManager ? 'Mess Report' : 'My Report'} — ${formatDateLabel(startStr)} to ${formatDateLabel(endStr)}`;
+  }
+  const panelTitleEl = document.getElementById('reportPanelTitle');
+  if(panelTitleEl){
+    panelTitleEl.textContent = isManager ? '📄 Monthly report — all members' : '📄 My monthly report';
   }
 
-  const monthMeals = allMealsCache.filter(d => (d.date||'').startsWith(monthStr));
-  const monthExpense = cachedExpenses.filter(e => (e.date||'').startsWith(monthStr)).reduce((s,e)=> s + Number(e.amount||0), 0);
-  const {perMember, totalMeals} = tallyMeals(monthMeals);
-  const mealRate = totalMeals > 0 ? monthExpense / totalMeals : 0;
+  const rangeMeals = allMealsCache.filter(d => d.date && d.date >= startStr && d.date <= endStr);
+  const rangeExpense = cachedExpenses.filter(e => e.date && e.date >= startStr && e.date <= endStr).reduce((s,e)=> s + Number(e.amount||0), 0);
+  const {perMember, totalMeals} = tallyMeals(rangeMeals);
+  const mealRate = totalMeals > 0 ? rangeExpense / totalMeals : 0;
+
+  // Managers can download everyone's report together; members only ever see (and can only
+  // ever download, since the download captures this same table) their own row.
+  const membersToShow = isManager ? messMembers : messMembers.filter(m => m.userId === currentUser.uid);
 
   const tbody = table.querySelector('tbody');
   tbody.innerHTML = '';
-  if(!messMembers.length){
-    tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state">No members yet.</div></td></tr>`;
+  if(!membersToShow.length){
+    tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state">No data for this range yet.</div></td></tr>`;
     return;
   }
-  messMembers.forEach(m => {
+  membersToShow.forEach(m => {
     const mCounts = perMember[m.userId] || {lunch:0, dinner:0, total:0};
     const cost = mCounts.total * mealRate;
     const bal = Number(m.deposit||0) - cost;
