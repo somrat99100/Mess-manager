@@ -196,6 +196,26 @@ footer{padding:56px 0 0; border-top:1px solid var(--line); margin-top:40px;}
   width:100%; padding:12px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:16px; font-family:inherit; background:var(--cream);
 }
 .field input:focus, .field select:focus{border-color:var(--moss); outline:none;}
+
+/* Custom date display overlay — native <input type="date"> renders its text using the
+   device's OS locale format (often MM/DD/YYYY on mobile regardless of region), which can't be
+   styled directly. We keep the real input for its native picker/value, hide its own text, and
+   show our own consistently-formatted "24-Jul-26" label on top instead. Taps still pass straight
+   through to the input since the overlay is non-interactive. */
+.date-input-wrap{position:relative; display:inline-flex; width:100%;}
+.date-input-wrap input[type="date"]{color:transparent; width:100%;}
+.date-input-wrap input[type="date"]::-webkit-datetime-edit,
+.date-input-wrap input[type="date"]::-webkit-datetime-edit-fields-wrapper,
+.date-input-wrap input[type="date"]::-webkit-datetime-edit-text,
+.date-input-wrap input[type="date"]::-webkit-datetime-edit-month-field,
+.date-input-wrap input[type="date"]::-webkit-datetime-edit-day-field,
+.date-input-wrap input[type="date"]::-webkit-datetime-edit-year-field{color:transparent;}
+.date-display-overlay{
+  position:absolute; left:14px; top:50%; transform:translateY(-50%);
+  pointer-events:none; font-weight:600; color:var(--ink); font-family:var(--font-mono);
+  white-space:nowrap; font-size:13.5px;
+}
+.field .date-display-overlay{font-size:16px;}
 .auth-toggle{text-align:center; margin-top:18px; font-size:13.5px; color:var(--ink-soft);}
 .auth-toggle button{background:none; border:none; color:var(--terracotta-dark); font-weight:700; text-decoration:underline;}
 .auth-error{background:#f6e9e5; color:var(--bad); padding:10px 14px; border-radius:10px; font-size:13px; margin-bottom:14px;}
@@ -611,6 +631,8 @@ tr:last-child td{border-bottom:none;}
   h1{font-size:26px;}
   .meals-head-row input[type="date"],
   .panel-head input[type="month"]{font-size:16px; padding:11px 14px;}
+  .meals-head-row .date-display-overlay,
+  .report-range-row .date-display-overlay{font-size:16px;}
 
   /* buttons: comfortable 44px+ touch targets everywhere */
   .btn{padding:14px 22px; font-size:15px;}
