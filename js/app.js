@@ -97,7 +97,18 @@ function toast(msg, type){
   el.className = 'toast' + (type ? ' ' + type : '');
   el.textContent = msg;
   document.getElementById('toastWrap').appendChild(el);
-  setTimeout(()=> el.remove(), 3800);
+  setTimeout(()=> el.remove(), 5200);
+}
+// A Firestore "permission-denied" error on a normal, expected read/write almost always means
+// the firestore.rules file in this project hasn't been deployed to the live Firebase project yet
+// (editing the file locally has no effect until it's deployed — see SETUP_GUIDE.md, step 2).
+// Surface that directly instead of just the raw Firestore error, since the raw message alone
+// doesn't tell you what to actually do about it.
+function loadErrorMsg(label, e){
+  if(e && e.code === 'permission-denied'){
+    return `${label}: permission denied — the Firestore rules likely haven't been deployed yet (see SETUP_GUIDE.md, "Deploy the updated Firestore rules").`;
+  }
+  return `${label}: ${e.message}`;
 }
 function money(n){ return '৳' + (Number(n)||0).toLocaleString('en-BD', {maximumFractionDigits:2}); }
 function setMetric(id, text){
@@ -500,7 +511,7 @@ function attachMessListeners(){
     renderNoticeScoreboard();
     renderCycleMetric();
     generateMonthlyReport();
-  }, e => toast('Could not load mess details: ' + e.message, 'err'));
+  }, e => toast(loadErrorMsg('Could not load mess details', e), 'err'));
   unsubscribers.push(messSub);
 
   const membersSub = db.collection('messMembers').where('messId','==', currentMessId).onSnapshot(snap => {
@@ -525,7 +536,7 @@ function attachMessListeners(){
     renderNoticeScoreboard();
     generateMonthlyReport();
     renderManagerRequestsPanel();
-  }, e => toast('Could not load members: ' + e.message, 'err'));
+  }, e => toast(loadErrorMsg('Could not load members', e), 'err'));
   unsubscribers.push(membersSub);
 
   // No orderBy here on purpose — a where() + orderBy() combo needs a manually-created composite
@@ -537,7 +548,7 @@ function attachMessListeners(){
     renderExpenseTable(cachedExpenses);
     renderDashboard();
     generateMonthlyReport();
-  }, e => toast('Could not load expenses: ' + e.message, 'err'));
+  }, e => toast(loadErrorMsg('Could not load expenses', e), 'err'));
   unsubscribers.push(expSub);
 
   // Every meal doc for this mess, kept live in one place — the dashboard, scoreboard, and monthly
@@ -547,7 +558,7 @@ function attachMessListeners(){
     renderDashboard();
     renderNoticeScoreboard();
     generateMonthlyReport();
-  }, e => toast('Could not load meal records: ' + e.message, 'err'));
+  }, e => toast(loadErrorMsg('Could not load meal records', e), 'err'));
   unsubscribers.push(allMealsSub);
 
   const reqSub = db.collection('mealOffRequests').where('messId','==', currentMessId).onSnapshot(snap => {
@@ -556,7 +567,7 @@ function attachMessListeners(){
     updateMealsTabBadge();
     const dateNow = document.getElementById('mealDatePicker').value || todayStr();
     renderMealCards(dateNow);
-  }, e => toast('Could not load meal-off requests: ' + e.message, 'err'));
+  }, e => toast(loadErrorMsg('Could not load meal-off requests', e), 'err'));
   unsubscribers.push(reqSub);
 
   const guestReqSub = db.collection('guestRequests').where('messId','==', currentMessId).onSnapshot(snap => {
@@ -565,7 +576,7 @@ function attachMessListeners(){
     updateMealsTabBadge();
     const dateNow = document.getElementById('mealDatePicker').value || todayStr();
     renderMealCards(dateNow);
-  }, e => toast('Could not load guest requests: ' + e.message, 'err'));
+  }, e => toast(loadErrorMsg('Could not load guest requests', e), 'err'));
   unsubscribers.push(guestReqSub);
 
   // Members asking to become the mess's manager — only the current manager can approve/decline.
@@ -573,20 +584,20 @@ function attachMessListeners(){
     messManagerRequests = snap.docs.map(d => ({id:d.id, ...d.data({serverTimestamps: 'estimate'})}));
     renderManagerRequestsPanel();
     renderMemberTable();
-  }, e => toast('Could not load manager requests: ' + e.message, 'err'));
+  }, e => toast(loadErrorMsg('Could not load manager requests', e), 'err'));
   unsubscribers.push(managerReqSub);
 
   // People who've asked to join this mess with the invite code — only the manager can approve/decline.
   const joinReqSub = db.collection('joinRequests').where('messId','==', currentMessId).onSnapshot(snap => {
     messJoinRequests = snap.docs.map(d => ({id:d.id, ...d.data({serverTimestamps: 'estimate'})}));
     renderJoinRequestsPanel();
-  }, e => toast('Could not load join requests: ' + e.message, 'err'));
+  }, e => toast(loadErrorMsg('Could not load join requests', e), 'err'));
   unsubscribers.push(joinReqSub);
 
   // Append-only log of who has managed this mess and for how long.
   const managerHistorySub = db.collection('managerHistory').where('messId','==', currentMessId).onSnapshot(snap => {
     renderManagerHistory(snap.docs.map(d => ({id:d.id, ...d.data()})));
-  }, e => toast('Could not load manager history: ' + e.message, 'err'));
+  }, e => toast(loadErrorMsg('Could not load manager history', e), 'err'));
   unsubscribers.push(managerHistorySub);
 
   const noticeSub = db.collection('notices').where('messId','==', currentMessId).onSnapshot(snap => {
@@ -594,7 +605,7 @@ function attachMessListeners(){
       .sort((a,b) => (b.createdAt ? b.createdAt.toMillis() : 0) - (a.createdAt ? a.createdAt.toMillis() : 0))
       .slice(0, 20);
     renderNoticeBoard(notices);
-  }, e => toast('Could not load notices: ' + e.message, 'err'));
+  }, e => toast(loadErrorMsg('Could not load notices', e), 'err'));
   unsubscribers.push(noticeSub);
 
   if(!document.getElementById('mealDatePicker').value){
@@ -740,7 +751,7 @@ function loadMealsForDate(dateStr){
     renderMealDeadlineNote();
     renderDayOffSwitch();
     renderDaySummary(dateStr);
-  }, e => toast('Could not load meals: ' + e.message, 'err'));
+  }, e => toast(loadErrorMsg('Could not load meals', e), 'err'));
   unsubscribers.push(mealDocUnsub);
 }
 
