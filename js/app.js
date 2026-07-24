@@ -112,6 +112,24 @@ function setMetric(id, text){
 function todayStr(){ const d = new Date(); return d.toISOString().slice(0,10); }
 function openModal(id){ document.getElementById(id).classList.remove('hidden'); }
 function closeModal(id){ document.getElementById(id).classList.add('hidden'); }
+
+// Every modal/sheet (including the mobile "more" sheet opened from the avatar) is a
+// .modal-backdrop with a .card/.modal panel inside it. Previously the only way to dismiss any
+// of them was to tap a specific in-panel button — tapping the dimmed backdrop around it, or
+// pressing Escape, did nothing. That made the mobile "Profile & change mess" sheet in particular
+// feel stuck open, with the only tappable options being its menu items (so a mis-tap could land
+// on "Log out"). This restores the standard "tap outside to dismiss" and Escape-to-close behavior
+// for every modal/sheet in the app, with no changes needed at each individual modal's markup.
+document.addEventListener('click', e => {
+  if(e.target.classList && e.target.classList.contains('modal-backdrop') && !e.target.classList.contains('hidden')){
+    e.target.classList.add('hidden');
+  }
+});
+document.addEventListener('keydown', e => {
+  if(e.key !== 'Escape') return;
+  document.querySelectorAll('.modal-backdrop:not(.hidden)').forEach(el => el.classList.add('hidden'));
+});
+
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function genInviteCode(name){
   const base = (name||'MESS').toUpperCase().replace(/[^A-Z]/g,'').slice(0,4) || 'MESS';
@@ -647,6 +665,23 @@ function openMoreSheet(){
 let currentMealsCache = {}; // memberId -> {lunch,dinner,guest}
 let currentDayOff = false;  // whole-day "mess off" switch for the selected date
 
+// A member's meal record is stored as a PARTIAL map in Firestore — only the fields that have
+// ever been explicitly written exist there (e.g. after toggling dinner only once, the doc has
+// {dinner:false} with no `lunch` key at all). Any field that was never written is meant to
+// default to ON (true) / 0 guests. Reading a partial record directly (rec.lunch on a doc that
+// only has `dinner`) previously evaluated to `undefined` → falsy → rendered as OFF, which is
+// what made turning dinner off look like it had also silently turned lunch off too. Always go
+// through this helper so missing fields fall back to their defaults instead of being treated
+// as false.
+function normalizeMealRec(rec){
+  return {
+    lunch: (rec && rec.lunch !== undefined) ? !!rec.lunch : true,
+    dinner: (rec && rec.dinner !== undefined) ? !!rec.dinner : true,
+    guestLunch: Number((rec && rec.guestLunch) || 0),
+    guestDinner: Number((rec && rec.guestDinner) || 0)
+  };
+}
+
 function isBeforeDeadlineFor(dateStr, mealType){
   // members may edit today's or future date's meals only while local time is before that
   // meal's own cutoff, and only for dates that are today or later.
@@ -720,7 +755,7 @@ function renderDaySummary(dateStr){
   dateLabelEl.textContent = formatDateLabel(dateStr) + (dateStr === todayStr() ? ' · today' : '');
   let lunch = 0, dinner = 0, guest = 0, offCount = 0;
   messMembers.forEach(m => {
-    const rec = currentMealsCache[m.userId] || {lunch:true, dinner:true, guestLunch:0, guestDinner:0};
+    const rec = normalizeMealRec(currentMealsCache[m.userId]);
     if(rec.lunch) lunch++; else offCount++;
     if(rec.dinner) dinner++; else offCount++;
     guest += Number(rec.guestLunch || 0) + Number(rec.guestDinner || 0);
@@ -756,7 +791,7 @@ function toggleDayOff(){
     // switching the whole day off: everyone's lunch & dinner go OFF (guest counts kept as-is)
     updatedMembers = {};
     messMembers.forEach(m => {
-      const cur = currentMealsCache[m.userId] || {lunch:true, dinner:true, guestLunch:0, guestDinner:0};
+      const cur = normalizeMealRec(currentMealsCache[m.userId]);
       updatedMembers[m.userId] = { ...cur, lunch:false, dinner:false };
     });
   }
@@ -794,18 +829,19 @@ function renderMealCards(dateStr){
   });
 
   ordered.forEach(mem => {
-    const rec = currentMealsCache[mem.userId] || {lunch:true, dinner:true, guestLunch:0, guestDinner:0}; // default ON, 0 guests
+    const rec = normalizeMealRec(currentMealsCache[mem.userId]); // missing fields default to ON, 0 guests
     const gL = Number(rec.guestLunch || 0);
     const gD = Number(rec.guestDinner || 0);
     const isSelf = mem.userId === currentUser.uid;
 
-    // Manager: can edit any current-or-future day, never a past one. Member: only their own row,
-    // only before that meal's deadline, and never once the day is fully switched off.
+    // Manager: can edit any day — past, present, or future — at any time, day-off switch included.
+    // Member: only their own row, only before that meal's deadline, and never once the day is
+    // fully switched off.
     const canEditLunch = isManager
-      ? (!currentDayOff && !isPastDay)
+      ? true
       : (isSelf && !currentDayOff && isBeforeDeadlineFor(dateStr, 'lunch'));
     const canEditDinner = isManager
-      ? (!currentDayOff && !isPastDay)
+      ? true
       : (isSelf && !currentDayOff && isBeforeDeadlineFor(dateStr, 'dinner'));
 
     const lunchPending = pendingOffForDate.find(r => r.memberId === mem.userId && r.mealType === 'lunch');
@@ -825,7 +861,10 @@ function renderMealCards(dateStr){
         ? `<button class="btn-request-off" onclick="requestMealOff('${dateStr}','lunch',false)">Request off</button>`
         : canRequestLunchOn
           ? `<button class="btn-request-on" onclick="requestMealOff('${dateStr}','lunch',true)">Request on</button>`
-          : `<button class="meal-toggle ${rec.lunch ? 'on':''}" ${canEditLunch?'':'disabled'} onclick="toggleMeal('${dateStr}','${mem.userId}','lunch')"><span class="knob"></span></button>`;
+          : `<select class="meal-select ${rec.lunch ? 'on':'off'}" ${canEditLunch?'':'disabled'} onchange="setMealState(this,'${dateStr}','${mem.userId}','lunch')">
+               <option value="on" ${rec.lunch ? 'selected':''}>ON</option>
+               <option value="off" ${!rec.lunch ? 'selected':''}>OFF</option>
+             </select>`;
 
     const dinnerCell = dinnerPending
       ? `<span class="request-pending-badge">${dinnerPending.desiredState === true ? 'Turning on' : 'Turning off'}</span>`
@@ -833,7 +872,10 @@ function renderMealCards(dateStr){
         ? `<button class="btn-request-off" onclick="requestMealOff('${dateStr}','dinner',false)">Request off</button>`
         : canRequestDinnerOn
           ? `<button class="btn-request-on" onclick="requestMealOff('${dateStr}','dinner',true)">Request on</button>`
-          : `<button class="meal-toggle ${rec.dinner ? 'on':''}" ${canEditDinner?'':'disabled'} onclick="toggleMeal('${dateStr}','${mem.userId}','dinner')"><span class="knob"></span></button>`;
+          : `<select class="meal-select ${rec.dinner ? 'on':'off'}" ${canEditDinner?'':'disabled'} onchange="setMealState(this,'${dateStr}','${mem.userId}','dinner')">
+               <option value="on" ${rec.dinner ? 'selected':''}>ON</option>
+               <option value="off" ${!rec.dinner ? 'selected':''}>OFF</option>
+             </select>`;
 
     // Guest meals — manager taps a chip to set that meal's exact count directly; a member taps
     // their own chip to request guest meals be added for lunch or dinner (goes to the manager for approval).
@@ -1036,21 +1078,26 @@ function renderRequestsPanel(){
   }).join('');
 }
 
-function toggleMeal(dateStr, memberId, type){
-  if(currentDayOff && myRole !== 'manager'){ toast('Meals are switched off for this day.', 'err'); return; }
-  const isPastDay = dateStr < todayStr();
-  if(myRole === 'manager' && isPastDay){ toast('Past days can\u2019t be edited.', 'err'); return; }
+// Meal ON/OFF is set via a dropdown (<select>) rather than a tap-to-flip switch, so the member
+// always picks the exact state they want instead of toggling relative to whatever the UI is
+// currently showing — this also sidesteps any stale-cache flicker making it look like the wrong
+// meal changed. `selectEl.value` is 'on' or 'off'.
+function setMealState(selectEl, dateStr, memberId, type){
+  const newVal = selectEl.value === 'on';
+  // Manager can edit any date — past, present, or future — at any time.
   const canEdit = myRole === 'manager'
-    ? !isPastDay
-    : (memberId === currentUser.uid && isBeforeDeadlineFor(dateStr, type));
+    ? true
+    : (!currentDayOff && memberId === currentUser.uid && isBeforeDeadlineFor(dateStr, type));
   if(!canEdit){
+    // revert the dropdown to reflect the real current state, then explain why
+    const current = normalizeMealRec(currentMealsCache[memberId]);
+    selectEl.value = current[type] ? 'on' : 'off';
+    if(currentDayOff){ toast('Meals are switched off for this day.', 'err'); return; }
     const label = type === 'dinner' ? 'dinner' : 'lunch';
     toast(`The ${label} deadline has passed — send an off-request instead.`, 'err');
     return;
   }
   const mealId = currentMessId + '_' + dateStr;
-  const current = currentMealsCache[memberId] || {lunch:true, dinner:true, guestLunch:0, guestDinner:0};
-  const newVal = !current[type];
   db.collection('meals').doc(mealId).set({
     messId: currentMessId, date: dateStr,
     members: { [memberId]: { [type]: newVal } },
@@ -1628,9 +1675,9 @@ function tallyMeals(mealDocs){
     const members = doc.members || {};
     Object.keys(members).forEach(uid => {
       if(!perMember[uid]) perMember[uid] = {lunch:0, dinner:0, total:0};
-      const rec = members[uid];
-      const lunch = (rec.lunch ? 1 : 0) + Number(rec.guestLunch || 0);
-      const dinner = (rec.dinner ? 1 : 0) + Number(rec.guestDinner || 0);
+      const rec = normalizeMealRec(members[uid]);
+      const lunch = (rec.lunch ? 1 : 0) + rec.guestLunch;
+      const dinner = (rec.dinner ? 1 : 0) + rec.guestDinner;
       perMember[uid].lunch += lunch;
       perMember[uid].dinner += dinner;
       perMember[uid].total += lunch + dinner;
