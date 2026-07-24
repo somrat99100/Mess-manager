@@ -116,6 +116,15 @@
         <a href="#" onclick="showAuth('login'); return false;">Log in</a>
         <a href="#" class="btn small terra" onclick="showAuth('register'); return false;">Get started</a>
       </div>
+      <button class="nav-burger" id="navBurgerBtn" onclick="toggleMobileNav()" aria-label="Menu">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+    <div class="nav-mobile-panel hidden" id="navMobilePanel">
+      <a href="#features" onclick="closeMobileNav()">Features</a>
+      <a href="#how-it-works" onclick="closeMobileNav()">How it works</a>
+      <a href="#" onclick="closeMobileNav(); showAuth('login'); return false;">Log in</a>
+      <a href="#" class="btn terra" onclick="closeMobileNav(); showAuth('register'); return false;">Get started</a>
     </div>
   </nav>
 
@@ -336,12 +345,29 @@
       <div class="brand"><svg viewBox="0 0 100 100"><rect width="100" height="100" rx="22" fill="#2d5016"/><g fill="none" stroke="#f9f6f3" stroke-width="6" stroke-linecap="round"><line x1="32" y1="18" x2="32" y2="50"/><line x1="24" y1="18" x2="24" y2="34"/><line x1="40" y1="18" x2="40" y2="34"/><path d="M24 34 Q24 50 32 50 Q40 50 40 34"/><line x1="32" y1="50" x2="32" y2="84"/><path d="M68 18 C58 18 58 32 63 40 C66 45 68 46 68 52 L68 84"/></g></svg>Mess Manager Pro</div>
       <div class="appbar-right">
         <span id="messNameChip" class="pill role"></span>
-        <div class="user-chip">
+        <button class="user-chip user-chip-btn" onclick="openMoreSheet()">
           <div class="avatar" id="userAvatar">?</div>
           <span id="userNameLabel"></span>
-        </div>
-        <button class="btn outline small" onclick="doLogout()">Log out</button>
+        </button>
+        <button class="btn outline small appbar-logout" onclick="doLogout()">Log out</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Account / more sheet — reachable from the avatar (all sizes) and the bottom nav's "More" tab (mobile) -->
+  <div class="modal-backdrop hidden" id="moreSheetModal">
+    <div class="card modal sheet-modal">
+      <div class="sheet-handle"></div>
+      <div class="sheet-user-row">
+        <div class="avatar" id="moreSheetAvatar">?</div>
+        <div>
+          <div class="sheet-user-name" id="moreSheetName">—</div>
+          <div class="sheet-user-mess" id="moreSheetMess">—</div>
+        </div>
+      </div>
+      <button class="sheet-item" onclick="closeModal('moreSheetModal'); switchTab('profile');"><span class="tab-icon">👤</span> Profile &amp; change mess</button>
+      <button class="sheet-item manager-only hidden" onclick="closeModal('moreSheetModal'); switchTab('settings');"><span class="tab-icon">⚙️</span> Mess settings</button>
+      <button class="sheet-item sheet-item-danger" onclick="closeModal('moreSheetModal'); doLogout();"><span class="tab-icon">🚪</span> Log out</button>
     </div>
   </div>
 
@@ -373,14 +399,24 @@
   <div id="mainAppState" class="hidden">
     <div class="tabbar">
       <div class="wrap">
-        <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard')">📊 <span>Dashboard</span></button>
-        <button class="tab-btn" data-tab="meals" onclick="switchTab('meals')">🗓️ <span>Meals</span><span class="tab-badge hidden" id="mealsTabBadge">0</span></button>
-        <button class="tab-btn" data-tab="expenses" onclick="switchTab('expenses')">💸 <span>Expenses</span></button>
-        <button class="tab-btn" data-tab="members" onclick="switchTab('members')">🧑‍🤝‍🧑 <span>Members</span></button>
-        <button class="tab-btn manager-only hidden" data-tab="settings" onclick="switchTab('settings')">⚙️ <span>Mess Settings</span></button>
-        <button class="tab-btn" data-tab="profile" onclick="switchTab('profile')">👤 <span>Profile</span></button>
+        <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard')"><span class="tab-icon">📊</span><span>Dashboard</span></button>
+        <button class="tab-btn" data-tab="meals" onclick="switchTab('meals')"><span class="tab-icon">🗓️</span><span>Meals</span><span class="tab-badge hidden" id="mealsTabBadge">0</span></button>
+        <button class="tab-btn" data-tab="expenses" onclick="switchTab('expenses')"><span class="tab-icon">💸</span><span>Expenses</span></button>
+        <button class="tab-btn" data-tab="members" onclick="switchTab('members')"><span class="tab-icon">🧑‍🤝‍🧑</span><span>Members</span></button>
+        <button class="tab-btn manager-only hidden" data-tab="settings" onclick="switchTab('settings')"><span class="tab-icon">⚙️</span><span>Settings</span></button>
+        <button class="tab-btn" data-tab="profile" onclick="switchTab('profile')"><span class="tab-icon">👤</span><span>Profile</span></button>
       </div>
     </div>
+
+    <!-- Mobile-only fixed bottom nav — mirrors the tabbar above but stays thumb-reachable on phones.
+         "More" opens the account sheet (Settings/Profile/Log out) instead of switching tab directly. -->
+    <nav class="bottom-nav">
+      <button class="bn-btn active" data-tab="dashboard" onclick="switchTab('dashboard')"><span class="bn-icon">📊</span><span>Dashboard</span></button>
+      <button class="bn-btn" data-tab="meals" onclick="switchTab('meals')"><span class="bn-icon">🗓️</span><span>Meals</span><span class="tab-badge hidden" id="mealsTabBadgeBn">0</span></button>
+      <button class="bn-btn" data-tab="expenses" onclick="switchTab('expenses')"><span class="bn-icon">💸</span><span>Expenses</span></button>
+      <button class="bn-btn" data-tab="members" onclick="switchTab('members')"><span class="bn-icon">🧑‍🤝‍🧑</span><span>Members</span></button>
+      <button class="bn-btn" onclick="openMoreSheet()"><span class="bn-icon">⋯</span><span>More</span></button>
+    </nav>
 
     <div class="app-content wrap">
 
@@ -496,7 +532,7 @@
         <!-- MEMBER BALANCES AT A GLANCE (moved from Dashboard) -->
         <div class="card panel">
           <div class="panel-head"><h3>🧑‍🤝‍🧑 Member balances at a glance</h3></div>
-          <div style="overflow-x:auto;"><table id="dashboardMemberTable" class="balance-table"><thead><tr><th>Member</th><th>Deposit</th><th>☀️ Lunch</th><th>🌙 Dinner</th><th>Total Meals</th><th>Cost</th><th>Balance</th><th>Status</th></tr></thead><tbody></tbody></table></div>
+          <div style="overflow-x:auto;"><table id="dashboardMemberTable" class="balance-table stack-mobile"><thead><tr><th>Member</th><th>Deposit</th><th>☀️ Lunch</th><th>🌙 Dinner</th><th>Total Meals</th><th>Cost</th><th>Balance</th><th>Status</th></tr></thead><tbody></tbody></table></div>
         </div>
 
       </div>
@@ -514,7 +550,7 @@
         </div>
         <div class="card panel">
           <div class="panel-head"><h3>All expenses</h3></div>
-          <div style="overflow-x:auto;"><table id="expenseTable"><thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Amount</th><th class="manager-only hidden"></th></tr></thead><tbody></tbody></table></div>
+          <div style="overflow-x:auto;"><table id="expenseTable" class="stack-mobile"><thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Amount</th><th class="manager-only hidden"></th></tr></thead><tbody></tbody></table></div>
         </div>
       </div>
 
@@ -542,7 +578,7 @@
 
         <div class="card panel">
           <div class="panel-head"><h3>Mess members</h3></div>
-          <div style="overflow-x:auto;"><table id="memberTable"><thead><tr><th>Name</th><th>Role</th><th>Deposit</th><th>Actions</th></tr></thead><tbody></tbody></table></div>
+          <div style="overflow-x:auto;"><table id="memberTable" class="stack-mobile"><thead><tr><th>Name</th><th>Role</th><th>Deposit</th><th>Actions</th></tr></thead><tbody></tbody></table></div>
         </div>
 
         <div class="card panel">
