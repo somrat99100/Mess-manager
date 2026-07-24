@@ -294,6 +294,8 @@ table{width:100%; border-collapse:collapse; font-size:13.5px;}
 th{text-align:left; padding:10px 8px; font-size:11.5px; text-transform:uppercase; letter-spacing:.03em; color:var(--ink-soft); border-bottom:2px solid var(--line);}
 td{padding:10px 8px; border-bottom:1px solid var(--line); vertical-align:middle;}
 tr:last-child td{border-bottom:none;}
+/* whole-day "mess off" switch (manager only) — still a tap-to-flip toggle, distinct from the
+   per-meal ON/OFF dropdowns below */
 .meal-toggle{
   width:56px; height:28px; border-radius:999px; border:none; background:var(--line); position:relative; transition:background .2s;
 }
@@ -301,6 +303,21 @@ tr:last-child td{border-bottom:none;}
 .meal-toggle .knob{position:absolute; top:3px; left:3px; width:22px; height:22px; border-radius:50%; background:#fff; transition:left .2s; box-shadow:0 1px 3px rgba(0,0,0,.2);}
 .meal-toggle.on .knob{left:31px;}
 .meal-toggle:disabled{opacity:.45; cursor:not-allowed;}
+
+/* per-member, per-meal ON/OFF dropdown */
+.meal-select{
+  appearance:none; -webkit-appearance:none; -moz-appearance:none;
+  width:84px; height:32px; padding:0 26px 0 12px; border-radius:8px;
+  border:1.5px solid var(--line); background-color:var(--cream-deep); color:var(--ink);
+  font-family:var(--font-body); font-weight:700; font-size:12.5px; letter-spacing:.03em;
+  cursor:pointer; transition:background-color .15s, border-color .15s, color .15s;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%235b5650' stroke-width='2'><path d='M5 8l5 5 5-5'/></svg>");
+  background-repeat:no-repeat; background-position:right 8px center; background-size:14px;
+}
+.meal-select.on{background-color:#eaf3e6; border-color:var(--good); color:var(--good);}
+.meal-select.off{background-color:#f6e9e5; border-color:var(--bad); color:var(--bad);}
+.meal-select:disabled{opacity:.55; cursor:not-allowed;}
+.meal-select:focus-visible{outline:2px solid var(--terracotta); outline-offset:2px;}
 
 .empty-state{text-align:center; padding:50px 20px; color:var(--ink-soft);}
 .empty-state svg{width:56px; height:56px; margin:0 auto 14px; opacity:.5;}
@@ -539,8 +556,14 @@ tr:last-child td{border-bottom:none;}
 ============================================================ */
 
 /* ---------- account "more" sheet ---------- */
-.sheet-modal{padding-top:14px;}
-.sheet-handle{width:40px; height:4px; border-radius:99px; background:var(--line); margin:0 auto 16px;}
+.sheet-modal{padding-top:14px; position:relative;}
+.sheet-handle{width:40px; height:4px; border-radius:99px; background:var(--line); margin:0 auto 16px; cursor:pointer;}
+.sheet-close{
+  position:absolute; top:10px; right:10px; width:32px; height:32px; border-radius:50%;
+  border:none; background:var(--cream-deep); color:var(--ink-soft); font-size:15px; line-height:1;
+  cursor:pointer; display:flex; align-items:center; justify-content:center; transition:background .15s, color .15s;
+}
+.sheet-close:hover{background:var(--line); color:var(--ink);}
 .sheet-user-row{display:flex; align-items:center; gap:12px; padding-bottom:16px; margin-bottom:8px; border-bottom:1px solid var(--line);}
 .sheet-user-row .avatar{width:44px; height:44px; font-size:16px;}
 .sheet-user-name{font-weight:700; font-size:15px;}
@@ -594,10 +617,13 @@ tr:last-child td{border-bottom:none;}
   .btn.small{padding:11px 16px; font-size:13.5px;}
   .btn.tiny{padding:10px 16px; font-size:12.5px;}
 
-  /* meal on/off toggle: bigger thumb target */
+  /* whole-day switch: bigger thumb target */
   .meal-toggle{width:60px; height:34px;}
   .meal-toggle .knob{width:26px; height:26px;}
   .meal-toggle.on .knob{left:31px;}
+
+  /* per-meal on/off dropdown: bigger tap target */
+  .meal-select{width:96px; height:38px; font-size:13.5px;}
 
   /* guest chips + request-off buttons: taller so they're easy to tap */
   .guest-chip{padding:9px 16px; font-size:13.5px;}
