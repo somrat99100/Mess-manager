@@ -45,15 +45,26 @@ if(typeof emailjs !== 'undefined' && EMAILJS_PUBLIC_KEY !== 'YOUR_EMAILJS_PUBLIC
   emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY });
 }
 
-/* Best-effort email notification — used for notices, meal-off confirmations, and manager
-   confirmations. Never blocks or breaks the action it's attached to: if EmailJS isn't
-   configured yet, or a send fails (bad email, offline, etc.), we just log it quietly. */
-function sendNotificationEmail(toEmail, toName, subject, message){
+/* Email notification — used for notices, meal-off confirmations, and manager confirmations.
+   Never blocks or breaks the action it's attached to (posting the notice, approving the
+   request, etc. always succeeds regardless of email outcome). To make delivery as reliable
+   as a client-only app can: if the first attempt fails (network blip, EmailJS hiccup), we
+   automatically retry once after a few seconds; if it's still failing after that, we tell
+   the person who triggered it — rather than silently dropping it — so they know to follow
+   up with that member directly if it matters. */
+function sendNotificationEmail(toEmail, toName, subject, message, isRetry){
   if(typeof emailjs === 'undefined' || EMAILJS_PUBLIC_KEY === 'YOUR_EMAILJS_PUBLIC_KEY') return;
   if(!toEmail) return;
   emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_NOTIFY_TEMPLATE_ID, {
     to_email: toEmail, to_name: toName || toEmail, subject, message
-  }, EMAILJS_PUBLIC_KEY).catch(e => console.warn('Notification email failed:', e));
+  }, EMAILJS_PUBLIC_KEY).catch(e => {
+    console.warn('Notification email failed' + (isRetry ? ' (after retry)' : '') + ':', e);
+    if(!isRetry){
+      setTimeout(()=> sendNotificationEmail(toEmail, toName, subject, message, true), 4000);
+    } else {
+      toast(`Couldn't email ${toName || toEmail} about "${subject}" — they may not see this update.`, 'err');
+    }
+  });
 }
 
 
@@ -73,6 +84,7 @@ let messJoinRequests = [];    // array of joinRequests docs for this mess (with 
 let unsubscribers = [];
 let joinReqUnsub = null;              // live listener on this user's own joinRequests, while awaiting approval
 let notifiedDeclinedReqIds = new Set(); // join-request ids we've already toasted a decline for (avoid repeat toasts)
+let consumedApprovedReqIds = new Set(); // join-request ids we've already reacted to as "approved" (avoid an infinite loop from a stale one)
 
 /* Cached, live-updated data — avoids re-fetching from the network on every render so the
    dashboard, scoreboard, and reports all compute instantly and stay in sync for every viewer. */
@@ -157,7 +169,12 @@ function doRegister(){
     .then(cred => db.collection('users').doc(cred.user.uid).set({
       name, email, otpVerified: false, createdAt: firebase.firestore.FieldValue.serverTimestamp()
     }))
-    .then(()=> sendOtpCode())
+    .then(()=>{
+      // Set this directly (rather than waiting on the async auth-state listener's own fetch) so the
+      // OTP email sent next actually greets the person by name instead of falling back to their email.
+      currentUserDoc = { name, email, otpVerified: false };
+      sendOtpCode();
+    })
     // The auth-state listener picks up the new signed-in (but unverified) user and shows
     // the OTP entry screen automatically — nothing else to do here on success.
     .catch(e => { errBox.textContent = e.message; errBox.classList.remove('hidden'); });
@@ -197,6 +214,7 @@ function doLogout(){
   unsubscribers.forEach(u => u());
   unsubscribers = [];
   if(joinReqUnsub){ joinReqUnsub(); joinReqUnsub = null; }
+  if(window._scoreboardTicker){ clearInterval(window._scoreboardTicker); window._scoreboardTicker = null; }
   auth.signOut();
 }
 
@@ -330,7 +348,14 @@ function loadUserAndMess(){
   }).catch(e => toast(e.message, 'err'));
 }
 
-/* ---------- while a user has no mess yet: watch for a pending/approved/declined join request ---------- */
+/* ---------- while a user has no mess yet: watch for a pending/approved/declined join request ----------
+   consumedApprovedReqIds tracks which "approved" requests we've already reacted to. Without it, an
+   OLD approved request from a mess the user has since left would look "approved" forever every time
+   this listener re-subscribes (e.g. loadUserAndMess() finding no membership calls this again), sending
+   loadUserAndMess() → this function → loadUserAndMess() → ... in an infinite loop. Marking an id as
+   consumed the first time we act on it means a stale one only ever causes one harmless extra check —
+   while a genuinely fresh approval (including one that arrives after a page refresh mid-wait) still
+   gets picked up immediately, since its id hasn't been seen before in this session. */
 function watchMyJoinRequests(){
   document.getElementById('mainAppState').classList.add('hidden');
   if(joinReqUnsub){ joinReqUnsub(); joinReqUnsub = null; }
@@ -338,13 +363,13 @@ function watchMyJoinRequests(){
     .onSnapshot(snap => {
       const reqs = snap.docs.map(d => ({id:d.id, ...d.data()}));
       const pending = reqs.find(r => r.status === 'pending');
-      const approved = reqs.find(r => r.status === 'approved');
+      const approved = reqs.find(r => r.status === 'approved' && !consumedApprovedReqIds.has(r.id));
       if(pending){
         document.getElementById('noMessState').classList.add('hidden');
         document.getElementById('joinPendingState').classList.remove('hidden');
         document.getElementById('joinPendingMessName').textContent = pending.messName || 'the mess';
       } else if(approved){
-        // the manager has approved us and created our messMembers row — pick it up now
+        consumedApprovedReqIds.add(approved.id);
         if(joinReqUnsub){ joinReqUnsub(); joinReqUnsub = null; }
         loadUserAndMess();
       } else {
@@ -577,16 +602,37 @@ function attachMessListeners(){
    TAB SWITCHING
 ============================================================ */
 function updateMealsTabBadge(){
-  const badge = document.getElementById('mealsTabBadge');
-  if(!badge) return;
-  if(myRole !== 'manager'){ badge.classList.add('hidden'); return; }
-  const count = messMealOffRequests.filter(r=>r.status==='pending').length + messGuestRequests.filter(r=>r.status==='pending').length;
-  badge.textContent = count;
-  badge.classList.toggle('hidden', count === 0);
+  const count = myRole === 'manager'
+    ? messMealOffRequests.filter(r=>r.status==='pending').length + messGuestRequests.filter(r=>r.status==='pending').length
+    : 0;
+  [document.getElementById('mealsTabBadge'), document.getElementById('mealsTabBadgeBn')].forEach(badge => {
+    if(!badge) return;
+    if(myRole !== 'manager'){ badge.classList.add('hidden'); return; }
+    badge.textContent = count;
+    badge.classList.toggle('hidden', count === 0);
+  });
 }
 function switchTab(tab){
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelectorAll('.bn-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('hidden', p.id !== 'tab-' + tab));
+  window.scrollTo({top: 0, behavior: 'smooth'});
+}
+
+/* ---------- mobile navigation: homepage hamburger + in-app account sheet ---------- */
+function toggleMobileNav(){
+  document.getElementById('navMobilePanel').classList.toggle('hidden');
+  document.getElementById('navBurgerBtn').classList.toggle('open');
+}
+function closeMobileNav(){
+  document.getElementById('navMobilePanel').classList.add('hidden');
+  document.getElementById('navBurgerBtn').classList.remove('open');
+}
+function openMoreSheet(){
+  document.getElementById('moreSheetAvatar').textContent = document.getElementById('userAvatar').textContent;
+  document.getElementById('moreSheetName').textContent = currentUserDoc ? currentUserDoc.name : '';
+  document.getElementById('moreSheetMess').textContent = currentMessDoc ? currentMessDoc.name : '';
+  openModal('moreSheetModal');
 }
 
 /* ============================================================
@@ -1044,11 +1090,11 @@ function renderExpenseTable(expenses){
   expenses.forEach(e => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td class="mono">${esc(e.date)}</td>
-      <td>${esc(e.category)}</td>
-      <td>${esc(e.description||'—')}</td>
-      <td class="mono">${money(e.amount)}</td>
-      <td class="manager-only hidden"><button class="btn danger small" onclick="deleteExpense('${e.id}')">Delete</button></td>
+      <td data-label="Date" class="mono">${esc(e.date)}</td>
+      <td data-label="Category">${esc(e.category)}</td>
+      <td data-label="Description">${esc(e.description||'—')}</td>
+      <td data-label="Amount" class="mono">${money(e.amount)}</td>
+      <td data-label="" class="manager-only hidden"><button class="btn danger small" onclick="deleteExpense('${e.id}')">Delete</button></td>
     `;
     tbody.appendChild(tr);
   });
@@ -1078,10 +1124,10 @@ function renderMemberTable(){
         : `<button class="btn outline small" onclick="requestToBecomeManager()">Request to be manager</button>`;
     }
     tr.innerHTML = `
-      <td>${esc(mem.name)} ${isSelf ? '<span class="pill you">You</span>' : ''}</td>
-      <td><span class="pill role">${mem.role}</span></td>
-      <td class="mono">${money(mem.deposit)}</td>
-      <td>${actionCell}</td>
+      <td data-label="Name">${esc(mem.name)} ${isSelf ? '<span class="pill you">You</span>' : ''}</td>
+      <td data-label="Role"><span class="pill role">${mem.role}</span></td>
+      <td data-label="Deposit" class="mono">${money(mem.deposit)}</td>
+      <td data-label="Actions">${actionCell}</td>
     `;
     tbody.appendChild(tr);
   });
@@ -1641,14 +1687,14 @@ function renderBalanceGlanceTable(rows){
     const tr = document.createElement('tr');
     if(isSelf) tr.style.background = 'var(--cream)';
     tr.innerHTML = `
-      <td>${esc(m.name)} ${isSelf ? '<span class="pill you">You</span>' : ''}</td>
-      <td class="mono">${money(m.deposit)}</td>
-      <td class="mono">${mCounts.lunch}</td>
-      <td class="mono">${mCounts.dinner}</td>
-      <td class="mono">${mCounts.total}</td>
-      <td class="mono">${money(cost.toFixed(2))}</td>
-      <td class="mono">${money(bal.toFixed(2))}</td>
-      <td><span class="pill ${bal>=0?'on':'off'}">${bal>=0 ? 'No due' : 'Due'}</span></td>
+      <td data-label="Member">${esc(m.name)} ${isSelf ? '<span class="pill you">You</span>' : ''}</td>
+      <td data-label="Deposit" class="mono">${money(m.deposit)}</td>
+      <td data-label="☀️ Lunch" class="mono">${mCounts.lunch}</td>
+      <td data-label="🌙 Dinner" class="mono">${mCounts.dinner}</td>
+      <td data-label="Total meals" class="mono">${mCounts.total}</td>
+      <td data-label="Cost" class="mono">${money(cost.toFixed(2))}</td>
+      <td data-label="Balance" class="mono">${money(bal.toFixed(2))}</td>
+      <td data-label="Status"><span class="pill ${bal>=0?'on':'off'}">${bal>=0 ? 'No due' : 'Due'}</span></td>
     `;
     tbody.appendChild(tr);
   });
