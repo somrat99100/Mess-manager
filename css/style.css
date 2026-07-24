@@ -88,6 +88,14 @@ h1,h2,h3,h4{font-family:var(--font-display); font-weight:600; line-height:1.15; 
 .nav-links{display:flex; gap:28px; align-items:center;}
 .nav-links a{font-size:14px; font-weight:600; color:var(--ink-soft); text-decoration:none;}
 .nav-links a:hover{color:var(--moss);}
+.nav-burger{display:none; flex-direction:column; justify-content:center; gap:5px; width:40px; height:40px; background:none; border:none; padding:0;}
+.nav-burger span{display:block; width:22px; height:2px; background:var(--moss); border-radius:2px; transition:transform .2s ease, opacity .2s ease;}
+.nav-burger.open span:nth-child(1){transform:translateY(7px) rotate(45deg);}
+.nav-burger.open span:nth-child(2){opacity:0;}
+.nav-burger.open span:nth-child(3){transform:translateY(-7px) rotate(-45deg);}
+.nav-mobile-panel{display:none; flex-direction:column; gap:2px; padding:8px 24px 20px; border-top:1px solid var(--line); background:var(--cream);}
+.nav-mobile-panel a{padding:13px 4px; font-size:15px; font-weight:600; color:var(--ink); text-decoration:none; border-bottom:1px solid var(--line);}
+.nav-mobile-panel a.btn{border-bottom:none; margin-top:10px; text-align:center;}
 
 .hero{padding:96px 0 70px; position:relative; overflow:hidden;}
 .hero .wrap{display:grid; grid-template-columns:1.1fr .9fr; gap:56px; align-items:center;}
@@ -164,6 +172,8 @@ footer{padding:56px 0 0; border-top:1px solid var(--line); margin-top:40px;}
   .hero .wrap{grid-template-columns:1fr;}
   .feat-grid{grid-template-columns:1fr 1fr;}
   .nav-links{display:none;}
+  .nav-burger{display:flex;}
+  .nav-mobile-panel:not(.hidden){display:flex;}
   .hero-visual{max-width:280px; margin:0 auto;}
 }
 @media (max-width:560px){
@@ -183,7 +193,7 @@ footer{padding:56px 0 0; border-top:1px solid var(--line); margin-top:40px;}
 .field{margin-bottom:16px;}
 .field label{display:block; font-size:12.5px; font-weight:600; color:var(--ink-soft); margin-bottom:6px; text-transform:uppercase; letter-spacing:.03em;}
 .field input, .field select{
-  width:100%; padding:12px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:14.5px; font-family:inherit; background:var(--cream);
+  width:100%; padding:12px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:16px; font-family:inherit; background:var(--cream);
 }
 .field input:focus, .field select:focus{border-color:var(--moss); outline:none;}
 .auth-toggle{text-align:center; margin-top:18px; font-size:13.5px; color:var(--ink-soft);}
@@ -202,7 +212,12 @@ footer{padding:56px 0 0; border-top:1px solid var(--line); margin-top:40px;}
 .appbar .brand svg{width:28px; height:28px;}
 .appbar-right{display:flex; align-items:center; gap:14px; flex-shrink:0;}
 .user-chip{display:flex; align-items:center; gap:10px; font-size:13.5px; font-weight:600;}
+.user-chip-btn{background:none; border:none; border-radius:999px; padding:4px 10px 4px 4px; transition:background .15s ease;}
+.user-chip-btn:hover{background:var(--cream);}
 .avatar{width:32px; height:32px; border-radius:50%; background:var(--moss); color:#fff; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:700; flex-shrink:0;}
+
+/* Bottom nav: hidden by default (desktop/tablet use the top tabbar); switched on for phones below */
+.bottom-nav{display:none;}
 
 @media(max-width:560px){
   .appbar .wrap{height:58px;}
@@ -496,3 +511,124 @@ tr:last-child td{border-bottom:none;}
 .balance-table tbody tr{transition:background .15s ease;}
 .balance-table tbody tr:hover{background:var(--cream);}
 .balance-table td:first-child{font-weight:600;}
+
+/* ============================================================
+   MOBILE OVERHAUL
+   - fixed bottom nav (phones only) so every core action stays thumb-reachable
+   - account/"more" sheet slides up instead of a tiny dropdown
+   - tables become stacked cards below 700px, no data lost, no horizontal scrolling
+   - modals become bottom sheets on phones; buttons/toggles get bigger tap targets
+============================================================ */
+
+/* ---------- account "more" sheet ---------- */
+.sheet-modal{padding-top:14px;}
+.sheet-handle{width:40px; height:4px; border-radius:99px; background:var(--line); margin:0 auto 16px;}
+.sheet-user-row{display:flex; align-items:center; gap:12px; padding-bottom:16px; margin-bottom:8px; border-bottom:1px solid var(--line);}
+.sheet-user-row .avatar{width:44px; height:44px; font-size:16px;}
+.sheet-user-name{font-weight:700; font-size:15px;}
+.sheet-user-mess{font-size:12.5px; color:var(--ink-soft);}
+.sheet-item{
+  display:flex; align-items:center; gap:12px; width:100%; text-align:left; background:none; border:none;
+  padding:14px 6px; font-size:15px; font-weight:600; color:var(--ink); border-radius:10px;
+}
+.sheet-item:hover{background:var(--cream);}
+.sheet-item .tab-icon{font-size:18px; width:22px; text-align:center;}
+.sheet-item-danger{color:var(--bad);}
+
+/* ---------- responsive tables → cards ---------- */
+@media(max-width:700px){
+  table.stack-mobile thead{display:none;}
+  table.stack-mobile, table.stack-mobile tbody{display:block; width:100%;}
+  table.stack-mobile tr{
+    display:block; border:1px solid var(--line); border-radius:14px; margin-bottom:10px;
+    padding:6px 14px; background:var(--paper);
+  }
+  table.stack-mobile tr:last-child{margin-bottom:0;}
+  table.stack-mobile td{
+    display:flex; align-items:center; justify-content:space-between; gap:14px;
+    border-bottom:1px solid var(--line); padding:11px 0; text-align:right; font-size:13.5px;
+  }
+  table.stack-mobile td:last-child{border-bottom:none;}
+  table.stack-mobile td[data-label]::before{
+    content:attr(data-label); font-weight:700; font-size:10.5px; text-transform:uppercase;
+    letter-spacing:.04em; color:var(--ink-soft); text-align:left; flex-shrink:0;
+  }
+  table.stack-mobile td[data-label=""]::before{content:none;}
+  table.stack-mobile td[data-label=""]{justify-content:flex-end;}
+  /* empty-state / colspan rows shouldn't get the card treatment */
+  table.stack-mobile tr:has(> td[colspan]){border:none; padding:0; background:none;}
+  table.stack-mobile tr:has(> td[colspan]) td{display:block; text-align:center; border-bottom:none; padding:0;}
+}
+
+/* ---------- general phone polish: bigger tap targets, no accidental zoom, breathing room ---------- */
+@media(max-width:700px){
+  body{padding-bottom:0;}
+  .wrap{padding:0 16px;}
+  .app-content{padding:20px 0 96px;} /* clears the fixed bottom nav */
+  .panel, .metrics-panel{padding:18px;}
+  .card.panel{border-radius:16px;}
+  h1{font-size:26px;}
+  .meals-head-row input[type="date"],
+  .panel-head input[type="month"]{font-size:16px; padding:11px 14px;}
+
+  /* buttons: comfortable 44px+ touch targets everywhere */
+  .btn{padding:14px 22px; font-size:15px;}
+  .btn.small{padding:11px 16px; font-size:13.5px;}
+  .btn.tiny{padding:10px 16px; font-size:12.5px;}
+
+  /* meal on/off toggle: bigger thumb target */
+  .meal-toggle{width:60px; height:34px;}
+  .meal-toggle .knob{width:26px; height:26px;}
+  .meal-toggle.on .knob{left:31px;}
+
+  /* guest chips + request-off buttons: taller so they're easy to tap */
+  .guest-chip{padding:9px 16px; font-size:13.5px;}
+  .btn-request-off{padding:9px 16px; font-size:12.5px;}
+
+  /* member/meal card rows: full-width stacked, generous spacing */
+  .meal-card-row{padding:14px 16px; gap:12px;}
+  .mc-col{flex-direction:row; justify-content:space-between; width:100%;}
+  .mc-col-label{margin-right:auto;}
+
+  /* modals become bottom sheets: easier to reach one-handed, no accidental backdrop taps */
+  .modal-backdrop{align-items:flex-end; padding:0;}
+  .modal{
+    max-width:100%; width:100%; border-radius:20px 20px 0 0; max-height:88vh;
+    padding:22px 20px calc(20px + env(safe-area-inset-bottom));
+  }
+  @keyframes sheetUp{from{transform:translateY(100%);} to{transform:translateY(0);}}
+  .modal-backdrop:not(.hidden) .modal{animation:sheetUp .22s cubic-bezier(.2,.9,.3,1.1);}
+  .modal-actions{flex-direction:column-reverse; gap:8px;}
+  .modal-actions .btn{width:100%;}
+
+  /* request/manager-history rows: stack instead of squeezing horizontally */
+  .request-row{flex-direction:column; align-items:stretch; gap:10px;}
+  .request-actions{justify-content:stretch;}
+  .request-actions .btn{flex:1;}
+}
+
+/* ---------- fixed bottom nav (phones only) ---------- */
+@media(max-width:700px){
+  .tabbar{display:none;}
+  .bottom-nav{
+    display:flex; position:fixed; left:0; right:0; bottom:0; z-index:60;
+    background:var(--paper); border-top:1px solid var(--line);
+    box-shadow:0 -6px 20px rgba(45,80,22,0.08);
+    padding:6px 4px calc(6px + env(safe-area-inset-bottom));
+  }
+  .bn-btn{
+    flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+    background:none; border:none; padding:7px 2px; border-radius:12px; position:relative;
+    color:var(--ink-soft); font-size:10.5px; font-weight:700; min-height:52px;
+  }
+  .bn-btn.active{color:var(--moss); background:var(--cream-deep);}
+  .bn-icon{font-size:20px; line-height:1;}
+  .bn-btn .tab-badge{position:absolute; top:2px; right:calc(50% - 22px);}
+
+  /* the appbar's own logout button is now redundant with the account sheet — free up the header */
+  .appbar-logout{display:none;}
+  .appbar .wrap{height:56px;}
+}
+@media(max-width:400px){
+  .bn-btn span:not(.bn-icon):not(.tab-badge){font-size:9.5px;}
+}
